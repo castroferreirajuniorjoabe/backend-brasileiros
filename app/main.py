@@ -84,7 +84,7 @@ app.add_middleware(
 )
 
 
-@app.get("/", tags=["Sistema"])
+@app.api_route("/", methods=["GET", "HEAD"], tags=["Sistema"])
 async def root():
     return {
         "status": "online",
@@ -94,7 +94,7 @@ async def root():
     }
 
 
-@app.get("/health", tags=["Sistema"])
+@app.api_route("/health", methods=["GET", "HEAD"], tags=["Sistema"])
 async def health_check():
     return {"status": "ok", "app": settings.APP_NAME}
 
