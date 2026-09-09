@@ -77,7 +77,7 @@ app.add_middleware(
         "https://frontend-brasileiros.onrender.com",
         "https://brasileirosnafranca.com",
     ] if settings.FRONTEND_URL != "*" else ["*"],
-    allow_origin_regex=r"^https://.*\.onrender\.com$",
+    allow_origin_regex=r"^https://.*(\.onrender\.com|\.netlify\.app)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
