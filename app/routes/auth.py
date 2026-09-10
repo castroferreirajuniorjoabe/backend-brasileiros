@@ -128,10 +128,11 @@ async def register(payload: RegisterRequest, db: AsyncClient = Depends(get_db)):
 @router.post("/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, db: AsyncClient = Depends(get_db)):
     """Login com email e senha, retorna JWT."""
+    email_clean = payload.email.strip().lower()
     result = (
         await db.table(Tables.USERS)
         .select("*")
-        .eq("email", payload.email)
+        .ilike("email", email_clean)
         .limit(1)
         .execute()
     )
