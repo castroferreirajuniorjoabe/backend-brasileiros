@@ -107,19 +107,31 @@ async def list_charity_ads(
             .eq("status", ModerationStatus.APPROVED.value)
             .neq("type", "tourism")
             .neq("type", "pet")
+            .neq("type", "job")
             .not_.like("title", "[%]")
         )
         if city:
             query = query.or_(f"location.ilike.%{city}%,city.ilike.%{city}%")
         result = await query.order("created_at", desc=True).execute()
-        return [_format_charity_ad(a) for a in result.data or []]
+        
+        # Filtro de segurança rigoroso em memória
+        clean_items = []
+        for a in result.data or []:
+            if a.get("type") in ["tourism", "pet", "job"]:
+                continue
+            title = a.get("title", "")
+            if title.startswith("[") and "]" in title:
+                continue
+            clean_items.append(_format_charity_ad(a))
+            
+        return clean_items
     except Exception:
         # Fallback de segurança filtrando em memória
         try:
             res_all = await db.table(Tables.CHARITY_ADS).select("*").eq("status", ModerationStatus.APPROVED.value).order("created_at", desc=True).execute()
             filtered = []
             for a in res_all.data or []:
-                if a.get("type") in ["tourism", "pet"]:
+                if a.get("type") in ["tourism", "pet", "job"]:
                     continue
                 t = a.get("title", "")
                 if t.startswith("[") and "]" in t:

@@ -61,6 +61,7 @@ async def create_ad(
     city: str = Form(...),
     category: str = Form(...),
     phone: str = Form(...),
+    landline_phone: Optional[str] = Form(None),
     email: str = Form(...),
     description: str = Form(...),
     website: Optional[str] = Form(None),
@@ -91,6 +92,8 @@ async def create_ad(
         else None
     )
 
+    clean_landline = landline_phone.strip() if landline_phone and landline_phone.strip() else None
+
     record = {
         "user_id": user["id"],
         "name": name,
@@ -108,24 +111,26 @@ async def create_ad(
         "is_highlighted": False,
     }
 
-    # Compatibilidade com colunas do banco (image_2_url / image_url_2 / business_hours / opening_hours)
-    try:
-        extended_record = {
-            **record,
-            "image_2_url": image_url_2,
-            "business_hours": opening_hours,
-        }
-        result = await db.table(Tables.ADS).insert(extended_record).execute()
-    except Exception:
+    # Compatibilidade com colunas do banco (image_2_url / image_url_2 / business_hours / opening_hours / landline_phone)
+    insert_attempts = [
+        {**record, "image_2_url": image_url_2, "business_hours": opening_hours, "landline_phone": clean_landline},
+        {**record, "image_url_2": image_url_2, "opening_hours": opening_hours, "landline_phone": clean_landline},
+        {**record, "image_2_url": image_url_2, "business_hours": opening_hours},
+        {**record, "image_url_2": image_url_2, "opening_hours": opening_hours},
+        record,
+    ]
+
+    result = None
+    for attempt in insert_attempts:
         try:
-            extended_record = {
-                **record,
-                "image_url_2": image_url_2,
-                "opening_hours": opening_hours,
-            }
-            result = await db.table(Tables.ADS).insert(extended_record).execute()
+            result = await db.table(Tables.ADS).insert(attempt).execute()
+            if result.data:
+                break
         except Exception:
-            result = await db.table(Tables.ADS).insert(record).execute()
+            continue
+
+    if not result or not result.data:
+        raise HTTPException(status_code=500, detail="Não foi possível salvar o anúncio.")
 
     ad = result.data[0]
     ad.update({
@@ -133,6 +138,7 @@ async def create_ad(
         "reviews_count": 0,
         "image_url_2": ad.get("image_2_url") or ad.get("image_url_2"),
         "opening_hours": ad.get("business_hours") or ad.get("opening_hours"),
+        "landline_phone": ad.get("landline_phone") or clean_landline,
     })
     return ad
 

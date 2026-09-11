@@ -40,6 +40,8 @@ MODERATED = {
     "tourism-spots": (Tables.TOURISM_SPOTS, ModerationStatus),
     "pet-posts": (Tables.PET_POSTS, ModerationStatus),
     "arrival-guide": (Tables.GROUPS, ModerationStatus),
+    "job-ads": (Tables.GROUPS, ModerationStatus),
+    "jobs": (Tables.GROUPS, ModerationStatus),
 }
 
 # Tabelas gerenciáveis via endpoints genéricos
@@ -59,6 +61,8 @@ MANAGEABLE_TABLES = {
     "monthly_ranking": Tables.MONTHLY_RANKING,
     "edit_history": Tables.EDIT_HISTORY,
     "admins": Tables.ADMINS,
+    "job_ads": Tables.GROUPS,
+    "jobs": Tables.GROUPS,
 }
 
 
@@ -98,7 +102,7 @@ async def get_stats(db: AsyncClient = Depends(get_db)):
         highlighted_ads=await count(Tables.ADS, is_highlighted=True),
         total_reviews=await count(Tables.REVIEWS),
         total_groups=await count(Tables.GROUPS),
-        pending_groups=await count(Tables.GROUPS, status=ModerationStatus.PENDING.value),
+        pending_groups=await count(Tables.GROUPS, is_approved=False),
         active_urgent_ads=await count(Tables.URGENT_ADS, status=ModerationStatus.APPROVED.value),
         total_charity_ads=await count(Tables.CHARITY_ADS),
         open_reports=await count(Tables.REPORTS, status=ReportStatus.OPEN.value),
@@ -107,7 +111,7 @@ async def get_stats(db: AsyncClient = Depends(get_db)):
     )
 
 
-# ---------- Moderação (anúncios, grupos, urgência, caridade) ----------
+# ---------- Moderação (anúncios, grupos, urgência, caridade, vagas) ----------
 
 @router.get("/moderation/{kind}")
 async def list_pending(
@@ -122,7 +126,27 @@ async def list_pending(
     target_status = status or "pending"
     
     try:
-        if kind == "arrival-guide":
+        if kind in ["job-ads", "jobs"]:
+            # Vagas de emprego salvas em GROUPS (category job_ad:...) ou CHARITY_ADS ([EMPREGO])
+            try:
+                query_grp = db.table(Tables.GROUPS).select("*").ilike("category", "job_ad:%")
+                if target_status == "pending":
+                    query_grp = query_grp.or_("is_approved.eq.false,is_approved.is.null")
+                elif target_status == "approved":
+                    query_grp = query_grp.eq("is_approved", True)
+                elif target_status == "rejected":
+                    query_grp = query_grp.eq("is_approved", False).eq("is_active", False)
+                res1 = await query_grp.order("created_at", desc=True).execute()
+                data1 = res1.data or []
+            except Exception:
+                data1 = []
+            try:
+                res2 = await db.table(Tables.CHARITY_ADS).select("*").ilike("title", "[EMPREGO]%").eq("status", target_status).order("created_at", desc=True).execute()
+                data2 = res2.data or []
+            except Exception:
+                data2 = []
+            return data1 + data2
+        elif kind == "arrival-guide":
             query = db.table(table).select("*").or_("category.ilike.arrival_rec:%,category.ilike.arrival_test:%,category.ilike.arrival_chat:%")
             if target_status == "pending":
                 query = query.or_("is_approved.eq.false,is_approved.is.null")
@@ -134,11 +158,11 @@ async def list_pending(
             return result.data or []
         elif kind == "groups":
             if target_status == "pending":
-                result = await db.table(table).select("*").not_.like("category", "arrival_%").not_.like("category", "chat:%").not_.like("category", "comment_%").not_.like("invite_link", "chat://%").not_.like("invite_link", "comment://%").not_.like("invite_link", "likes:%").or_("is_approved.eq.false,is_approved.is.null").order("created_at", desc=True).execute()
+                result = await db.table(table).select("*").not_.like("category", "news_banner:%").not_.like("category", "job_ad:%").not_.like("category", "arrival_%").not_.like("category", "chat:%").not_.like("category", "comment_%").not_.like("name", "[NOVIDADE]%").not_.like("name", "[EMPREGO]%").not_.like("invite_link", "banner:%").not_.like("invite_link", "chat://%").not_.like("invite_link", "comment://%").not_.like("invite_link", "likes:%").or_("is_approved.eq.false,is_approved.is.null").order("created_at", desc=True).execute()
             else:
-                result = await db.table(table).select("*").not_.like("category", "arrival_%").not_.like("category", "chat:%").not_.like("category", "comment_%").not_.like("invite_link", "chat://%").not_.like("invite_link", "comment://%").not_.like("invite_link", "likes:%").eq("is_approved", True).order("created_at", desc=True).execute()
+                result = await db.table(table).select("*").not_.like("category", "news_banner:%").not_.like("category", "job_ad:%").not_.like("category", "arrival_%").not_.like("category", "chat:%").not_.like("category", "comment_%").not_.like("name", "[NOVIDADE]%").not_.like("name", "[EMPREGO]%").not_.like("invite_link", "banner:%").not_.like("invite_link", "chat://%").not_.like("invite_link", "comment://%").not_.like("invite_link", "likes:%").eq("is_approved", True).order("created_at", desc=True).execute()
         elif kind == "charity-ads":
-            # Exclui rigorosamente postagens de pets ou passeios salvos em charity_ads
+            # Exclui rigorosamente postagens de pets, passeios ou empregos salvos em charity_ads
             result = (
                 await db.table(table)
                 .select("*")
@@ -147,6 +171,7 @@ async def list_pending(
                 .neq("type", "tourism")
                 .not_.like("title", "[PET%")
                 .not_.like("title", "[PASSEIO%")
+                .not_.like("title", "[EMPREGO%")
                 .order("created_at", desc=True)
                 .execute()
             )
@@ -188,13 +213,20 @@ async def list_pending(
 
 @router.post("/moderation/{kind}/{item_id}/approve")
 async def approve_item(kind: str, item_id: str, db: AsyncClient = Depends(get_db)):
-    """Aprova um item pendente (anúncio, grupo, urgência, caridade, turismo, pet ou chegada)."""
+    """Aprova um item pendente (anúncio, grupo, urgência, caridade, turismo, pet, chegada ou emprego)."""
     if kind not in MODERATED:
         raise HTTPException(status_code=404, detail="Tipo inválido.")
     table, status_enum = MODERATED[kind]
     try:
         if kind in ["groups", "arrival-guide"]:
-            result = await db.table(table).update({"is_approved": True, "is_active": True}).eq("id", item_id).execute()
+            result = await db.table(table).update({"is_approved": True, "is_active": True, "status": "approved"}).eq("id", item_id).execute()
+        elif kind in ["job-ads", "jobs"]:
+            try:
+                result = await db.table(Tables.GROUPS).update({"status": "approved", "is_approved": True, "is_active": True}).eq("id", item_id).execute()
+                if not result.data:
+                    result = await db.table(Tables.CHARITY_ADS).update({"status": "approved"}).eq("id", item_id).execute()
+            except Exception:
+                result = await db.table(Tables.CHARITY_ADS).update({"status": "approved"}).eq("id", item_id).execute()
         else:
             result = await db.table(table).update({"status": status_enum.APPROVED.value}).eq("id", item_id).execute()
     except Exception:
@@ -221,14 +253,24 @@ async def reject_item(
     table, status_enum = MODERATED[kind]
     update = {}
     if kind in ["groups", "arrival-guide"]:
-        update = {"is_approved": False, "is_active": False}
+        update = {"is_approved": False, "is_active": False, "status": "rejected"}
+    elif kind in ["job-ads", "jobs"]:
+        update = {"status": "rejected", "is_approved": False, "is_active": False}
     else:
         update = {"status": status_enum.REJECTED.value}
     
     if payload and payload.reason:
         update["rejection_reason"] = payload.reason
     try:
-        result = await db.table(table).update(update).eq("id", item_id).execute()
+        if kind in ["job-ads", "jobs"]:
+            try:
+                result = await db.table(Tables.GROUPS).update(update).eq("id", item_id).execute()
+                if not result.data:
+                    result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
+            except Exception:
+                result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
+        else:
+            result = await db.table(table).update(update).eq("id", item_id).execute()
     except Exception:
         update_fallback = {"status": "rejected"}
         if payload and payload.reason:

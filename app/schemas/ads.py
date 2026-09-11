@@ -12,6 +12,7 @@ class AdUpdateRequest(BaseModel):
     city: str | None = None
     category: str | None = None
     phone: str | None = None
+    landline_phone: str | None = None
     email: str | None = None
     description: str | None = None
     website: HttpUrl | None = None
@@ -28,6 +29,7 @@ class AdResponse(BaseModel):
     city: str
     category: str
     phone: str
+    landline_phone: str | None = None
     email: str
     description: str
     image_url: str

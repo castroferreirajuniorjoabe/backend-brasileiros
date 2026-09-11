@@ -108,7 +108,7 @@ async def list_groups(
     db: AsyncClient = Depends(get_db),
     _visitor: dict | None = Depends(get_optional_user),
 ):
-    """Lista grupos aprovados com filtros (público). Exclui estritamente mensagens e itens de Chegando na França e Bate-papo."""
+    """Lista grupos aprovados com filtros (público). Exclui estritamente mensagens, chegadas, vagas e banners de novidades/patrocínios."""
     try:
         query = (
             db.table(Tables.GROUPS)
@@ -117,9 +117,14 @@ async def list_groups(
             .not_.like("category", "chat:%")
             .not_.like("category", "arrival_%")
             .not_.like("category", "comment_%")
+            .not_.like("category", "job_ad:%")
+            .not_.like("category", "news_banner:%")
+            .not_.like("name", "[NOVIDADE]%")
+            .not_.like("name", "[EMPREGO]%")
             .not_.like("invite_link", "chat://%")
             .not_.like("invite_link", "comment://%")
             .not_.like("invite_link", "likes:%")
+            .not_.like("invite_link", "banner:%")
         )
         if city:
             query = query.ilike("city", f"%{city}%")
@@ -128,7 +133,20 @@ async def list_groups(
         if platform:
             query = query.eq("platform", platform.value)
         result = await query.order("created_at", desc=True).execute()
-        return [_format_group(g) for g in result.data or []]
+        
+        filtered = []
+        for g in result.data or []:
+            cat = g.get("category") or ""
+            inv = g.get("invite_link") or ""
+            nm = g.get("name") or ""
+            if cat.startswith("news_banner:") or cat.startswith("job_ad:") or cat.startswith("chat:") or cat.startswith("arrival_") or cat.startswith("comment_"):
+                continue
+            if inv.startswith("banner:") or inv.startswith("chat://") or inv.startswith("comment://") or inv.startswith("likes:"):
+                continue
+            if nm.startswith("[NOVIDADE]") or nm.startswith("[EMPREGO]"):
+                continue
+            filtered.append(_format_group(g))
+        return filtered
     except Exception:
         try:
             query = db.table(Tables.GROUPS).select("*").order("created_at", desc=True)
@@ -137,9 +155,12 @@ async def list_groups(
             for g in result.data or []:
                 cat = g.get("category") or ""
                 inv = g.get("invite_link") or ""
-                if cat.startswith("chat:") or cat.startswith("arrival_") or cat.startswith("comment_"):
+                nm = g.get("name") or ""
+                if cat.startswith("news_banner:") or cat.startswith("job_ad:") or cat.startswith("chat:") or cat.startswith("arrival_") or cat.startswith("comment_"):
                     continue
-                if inv.startswith("chat://") or inv.startswith("comment://") or inv.startswith("likes:"):
+                if inv.startswith("banner:") or inv.startswith("chat://") or inv.startswith("comment://") or inv.startswith("likes:"):
+                    continue
+                if nm.startswith("[NOVIDADE]") or nm.startswith("[EMPREGO]"):
                     continue
                 if city and city.lower() not in (g.get("city") or "").lower():
                     continue

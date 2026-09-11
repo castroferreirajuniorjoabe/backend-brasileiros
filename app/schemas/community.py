@@ -125,3 +125,37 @@ class ItemCommentListResponse(BaseModel):
     total: int
     items: list[ItemCommentResponse]
 
+
+# ---------- Vagas & Anúncios de Emprego ----------
+
+class JobAdResponse(BaseModel):
+    id: str
+    user_id: str
+    title: str
+    city: str
+    contract_type: str  # CDI, CDD, Intérim, Freelance, Stage, Outro
+    description: str
+    email: str | None = None
+    whatsapp: str | None = None
+    phone: str | None = None
+    landline_phone: str | None = None
+    badge: str = "EMPREGO"
+    status: str
+    created_at: str | None = None
+
+
+# ---------- Carrossel "Novidades Chegando" & Patrocínios (Admin Only) ----------
+
+class NewsCarouselItem(BaseModel):
+    id: str
+    title: str
+    subtitle: str | None = None
+    image_url: str
+    link_url: str | None = None
+    button_text: str | None = "Saiba Mais"
+    badge_tag: str | None = "Novidade"
+    is_active: bool = True
+    order_index: int = 0
+    created_at: str | None = None
+
+
