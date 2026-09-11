@@ -103,13 +103,15 @@ async def create_job_ad(
     contact_link = f"https://wa.me/{clean_whatsapp.replace('+', '').replace(' ', '')}" if clean_whatsapp else (f"mailto:{clean_email}" if clean_email else f"tel:{clean_phone or clean_landline}")
 
     group_record = {
-        "user_id": user["id"],
+        "created_by": user["id"],
         "name": f"[EMPREGO] {clean_title}",
         "city": clean_city,
         "category": f"{JOB_PREFIX}{meta_json}",
         "platform": "whatsapp" if clean_whatsapp else "facebook",
-        "link": contact_link,
+        "invite_link": contact_link,
         "description": clean_desc,
+        "is_approved": True,
+        "is_active": True,
         "status": ModerationStatus.APPROVED.value,
     }
 
@@ -118,23 +120,32 @@ async def create_job_ad(
         if res.data:
             return _format_job_ad(res.data[0])
     except Exception as e:
-        # Fallback 1: tenta sem prefixo se der erro
+        # Fallback 1: sem coluna status
         try:
-            minimal_record = {
-                "user_id": user["id"],
-                "name": f"[EMPREGO] {clean_title}",
-                "city": clean_city,
-                "category": "emprego",
-                "platform": "whatsapp" if clean_whatsapp else "facebook",
-                "link": contact_link,
-                "description": f"Tipo de Contrato: {clean_contract}\n\n{clean_desc}\n\n[META_JOB]{meta_json}[/META_JOB]",
-                "status": ModerationStatus.APPROVED.value,
-            }
-            res = await db.table(Tables.GROUPS).insert(minimal_record).execute()
+            record_fallback = dict(group_record)
+            record_fallback.pop("status", None)
+            res = await db.table(Tables.GROUPS).insert(record_fallback).execute()
             if res.data:
                 return _format_job_ad(res.data[0])
         except Exception:
-            raise HTTPException(status_code=500, detail=f"Erro ao salvar vaga de emprego: {str(e)}")
+            pass
+        # Fallback 2: tabela charity_ads como alternativa se groups falhar
+        try:
+            charity_record = {
+                "user_id": user["id"],
+                "type": "job",
+                "title": f"[EMPREGO] {clean_title}",
+                "description": f"Tipo de Contrato: {clean_contract}\n\n{clean_desc}\n\n[META_JOB]{meta_json}[/META_JOB]",
+                "location": clean_city,
+                "contact_phone": clean_whatsapp or clean_phone or clean_landline or "",
+                "status": ModerationStatus.APPROVED.value,
+            }
+            res = await db.table(Tables.CHARITY_ADS).insert(charity_record).execute()
+            if res.data:
+                return _format_job_ad(res.data[0])
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar vaga de emprego: {str(e)}")
 
 
 @router.get("", response_model=list[JobAdResponse])
@@ -231,9 +242,10 @@ async def delete_job_ad(
 ):
     """Exclui anúncio de emprego (apenas o criador ou administrador)."""
     try:
-        res = await db.table(Tables.GROUPS).select("user_id").eq("id", job_id).limit(1).execute()
+        res = await db.table(Tables.GROUPS).select("*").eq("id", job_id).limit(1).execute()
         if res.data:
-            if res.data[0]["user_id"] != user["id"] and not user.get("is_admin"):
+            owner_id = res.data[0].get("created_by") or res.data[0].get("user_id")
+            if owner_id != user["id"] and not user.get("is_admin"):
                 raise HTTPException(status_code=403, detail="Sem permissão.")
             await db.table(Tables.GROUPS).delete().eq("id", job_id).execute()
             return None
