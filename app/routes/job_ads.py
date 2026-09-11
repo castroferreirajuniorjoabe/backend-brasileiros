@@ -112,23 +112,16 @@ async def create_job_ad(
         "description": clean_desc,
         "is_approved": True,
         "is_active": True,
-        "status": ModerationStatus.APPROVED.value,
     }
 
     try:
         res = await db.table(Tables.GROUPS).insert(group_record).execute()
         if res.data:
             return _format_job_ad(res.data[0])
+        raise HTTPException(status_code=500, detail="Não foi possível salvar o anúncio de emprego.")
+    except HTTPException:
+        raise
     except Exception as e:
-        # Fallback 1: sem coluna status
-        try:
-            record_fallback = dict(group_record)
-            record_fallback.pop("status", None)
-            res = await db.table(Tables.GROUPS).insert(record_fallback).execute()
-            if res.data:
-                return _format_job_ad(res.data[0])
-        except Exception:
-            pass
         raise HTTPException(status_code=500, detail=f"Erro ao salvar vaga de emprego: {str(e)}")
 
 
