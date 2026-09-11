@@ -129,22 +129,6 @@ async def create_job_ad(
                 return _format_job_ad(res.data[0])
         except Exception:
             pass
-        # Fallback 2: tabela charity_ads como alternativa se groups falhar
-        try:
-            charity_record = {
-                "user_id": user["id"],
-                "type": "job",
-                "title": f"[EMPREGO] {clean_title}",
-                "description": f"Tipo de Contrato: {clean_contract}\n\n{clean_desc}\n\n[META_JOB]{meta_json}[/META_JOB]",
-                "location": clean_city,
-                "contact_phone": clean_whatsapp or clean_phone or clean_landline or "",
-                "status": ModerationStatus.APPROVED.value,
-            }
-            res = await db.table(Tables.CHARITY_ADS).insert(charity_record).execute()
-            if res.data:
-                return _format_job_ad(res.data[0])
-        except Exception:
-            pass
         raise HTTPException(status_code=500, detail=f"Erro ao salvar vaga de emprego: {str(e)}")
 
 
@@ -159,33 +143,18 @@ async def list_job_ads(
     """Lista todas as vagas de emprego ativas com filtros por cidade, contrato e palavra-chave."""
     job_ads = []
 
-    # 1. Busca dos registros da tabela groups com prefixo job_ad:
+    # Busca dos registros da tabela groups com prefixo job_ad:
     try:
         query = (
             db.table(Tables.GROUPS)
             .select("*")
             .ilike("category", f"{JOB_PREFIX}%")
-            .eq("status", ModerationStatus.APPROVED.value)
+            .or_("is_approved.eq.true,is_active.eq.true")
         )
         if city:
             query = query.ilike("city", f"%{city}%")
         res = await query.order("created_at", desc=True).execute()
         for item in res.data or []:
-            job_ads.append(_format_job_ad(item))
-    except Exception:
-        pass
-
-    # 2. Busca também do fallback de charity_ads se houver
-    try:
-        res_charity = (
-            await db.table(Tables.CHARITY_ADS)
-            .select("*")
-            .ilike("title", "[EMPREGO]%")
-            .eq("status", ModerationStatus.APPROVED.value)
-            .order("created_at", desc=True)
-            .execute()
-        )
-        for item in res_charity.data or []:
             job_ads.append(_format_job_ad(item))
     except Exception:
         pass
@@ -224,13 +193,6 @@ async def get_job_ad(
     except Exception:
         pass
 
-    try:
-        res = await db.table(Tables.CHARITY_ADS).select("*").eq("id", job_id).limit(1).execute()
-        if res.data:
-            return _format_job_ad(res.data[0])
-    except Exception:
-        pass
-
     raise HTTPException(status_code=404, detail="Vaga de emprego não encontrada.")
 
 
@@ -248,18 +210,6 @@ async def delete_job_ad(
             if owner_id != user["id"] and not user.get("is_admin"):
                 raise HTTPException(status_code=403, detail="Sem permissão.")
             await db.table(Tables.GROUPS).delete().eq("id", job_id).execute()
-            return None
-    except HTTPException:
-        raise
-    except Exception:
-        pass
-
-    try:
-        res = await db.table(Tables.CHARITY_ADS).select("user_id").eq("id", job_id).limit(1).execute()
-        if res.data:
-            if res.data[0]["user_id"] != user["id"] and not user.get("is_admin"):
-                raise HTTPException(status_code=403, detail="Sem permissão.")
-            await db.table(Tables.CHARITY_ADS).delete().eq("id", job_id).execute()
             return None
     except HTTPException:
         raise

@@ -117,10 +117,13 @@ async def list_charity_ads(
         # Filtro de segurança rigoroso em memória
         clean_items = []
         for a in result.data or []:
-            if a.get("type") in ["tourism", "pet", "job"]:
+            ad_type = str(a.get("type") or "").lower()
+            if ad_type in ["tourism", "pet", "job", "job_ad", "employment"]:
                 continue
-            title = a.get("title", "")
-            if title.startswith("[") and "]" in title:
+            title = str(a.get("title") or "")
+            desc = str(a.get("description") or "")
+            # Se tiver prefixo de colchetes ou for remanescente de teste de emprego
+            if (title.startswith("[") and "]" in title) or "[meta_job]" in desc.lower() or "[emprego]" in title.lower():
                 continue
             clean_items.append(_format_charity_ad(a))
             
@@ -131,10 +134,12 @@ async def list_charity_ads(
             res_all = await db.table(Tables.CHARITY_ADS).select("*").eq("status", ModerationStatus.APPROVED.value).order("created_at", desc=True).execute()
             filtered = []
             for a in res_all.data or []:
-                if a.get("type") in ["tourism", "pet", "job"]:
+                ad_type = str(a.get("type") or "").lower()
+                if ad_type in ["tourism", "pet", "job", "job_ad", "employment"]:
                     continue
-                t = a.get("title", "")
-                if t.startswith("[") and "]" in t:
+                t = str(a.get("title") or "")
+                desc = str(a.get("description") or "")
+                if (t.startswith("[") and "]" in t) or "[meta_job]" in desc.lower() or "[emprego]" in t.lower():
                     continue
                 if city and (city.lower() not in (a.get("location") or "").lower() and city.lower() not in (a.get("city") or "").lower()):
                     continue
