@@ -19,6 +19,7 @@ class Tables:
     MONTHLY_RANKING = "monthly_ranking"
     EDIT_HISTORY = "edit_history"
     ADMINS = "admins"
+    NOTIFICATIONS = "notifications"
 
 
 class AdStatus(str, Enum):

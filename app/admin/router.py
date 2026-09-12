@@ -23,6 +23,7 @@ from app.schemas.admin_ops import (
 )
 from app.schemas.ads import RejectRequest as AdRejectRequest
 from app.utils.deps import get_admin_user
+from app.utils.notifications import create_notification
 from app.utils.security import generate_gift_code, utcnow
 
 router = APIRouter(
@@ -237,7 +238,23 @@ async def approve_item(kind: str, item_id: str, db: AsyncClient = Depends(get_db
 
     if not result.data:
         raise HTTPException(status_code=404, detail="Item não encontrado.")
-    return result.data[0]
+    
+    item_data = result.data[0]
+    # Cria notificação para o dono do item se houver user_id
+    item_user_id = item_data.get("user_id")
+    if item_user_id:
+        item_title = item_data.get("name") or item_data.get("title") or "item"
+        link = f"/anuncio/{item_id}" if kind == "ads" else f"/{kind}"
+        await create_notification(
+            db=db,
+            user_id=item_user_id,
+            title="Publicação Aprovada!",
+            message=f"Sua publicação \"{item_title}\" foi aprovada e já está visível.",
+            type="ad_approved",
+            link=link,
+        )
+
+    return item_data
 
 
 @router.post("/moderation/{kind}/{item_id}/reject")
@@ -278,7 +295,23 @@ async def reject_item(
         result = await db.table(table).update(update_fallback).eq("id", item_id).execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="Item não encontrado.")
-    return result.data[0]
+    
+    item_data = result.data[0]
+    item_user_id = item_data.get("user_id")
+    if item_user_id:
+        item_title = item_data.get("name") or item_data.get("title") or "item"
+        reason_msg = f" Motivo: {payload.reason}" if payload and payload.reason else ""
+        await create_notification(
+            db=db,
+            user_id=item_user_id,
+            title="Publicação Não Aprovada",
+            message=f"Sua publicação \"{item_title}\" precisa de ajustes.{reason_msg}",
+            type="ad_rejected",
+            link="/painel",
+        )
+
+    return item_data
+
 
 
 # ---------- Usuários ----------

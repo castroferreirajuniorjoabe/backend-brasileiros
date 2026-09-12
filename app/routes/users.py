@@ -88,8 +88,35 @@ async def get_user_notifications(
     """Retorna notificações discretas e recentes para o usuário logado."""
     notifications = []
     
+    # 1. Busca notificações reais persistidas na tabela `notifications`
     try:
-        # 1. Anúncios próprios aprovados recentemente ou com destaque ativo
+        db_res = (
+            await db.table(Tables.NOTIFICATIONS)
+            .select("*")
+            .eq("user_id", user["id"])
+            .eq("is_read", False)
+            .order("created_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+        for notif in db_res.data or []:
+            notifications.append({
+                "id": str(notif["id"]),
+                "type": notif.get("type") or "general",
+                "title": notif.get("title") or "Notificação",
+                "message": notif.get("message") or "",
+                "link": notif.get("link") or "",
+                "is_read": notif.get("is_read", False),
+                "created_at": notif.get("created_at"),
+            })
+    except Exception:
+        pass
+
+    if notifications:
+        return notifications
+
+    # 2. Fallback: computa eventos recentes se não houver notificações explícitas
+    try:
         ads_res = (
             await db.table(Tables.ADS)
             .select("id, name, status, is_highlighted, created_at")
@@ -120,7 +147,6 @@ async def get_user_notifications(
                     "link": f"/anuncio/{ad['id']}",
                 })
 
-        # 2. Avaliações recentes recebidas nos anúncios do usuário
         my_ad_ids = [ad["id"] for ad in (ads_res.data or [])]
         if my_ad_ids:
             rev_res = (
@@ -142,29 +168,10 @@ async def get_user_notifications(
                     "created_at": rev.get("created_at"),
                     "link": f"/anuncio/{rev['ad_id']}",
                 })
-
-        # 3. Comentários recentes
-        comm_res = (
-            await db.table(Tables.ITEM_COMMENTS)
-            .select("id, target_id, target_type, message, created_at")
-            .order("created_at", desc=True)
-            .limit(3)
-            .execute()
-        )
-        for comm in comm_res.data or []:
-            notifications.append({
-                "id": f"comm_{comm['id']}",
-                "type": "new_comment",
-                "icon": "message",
-                "title": "Nova Mensagem",
-                "message": f"Novo comentário na comunidade: {comm['message'][:35]}...",
-                "created_at": comm.get("created_at"),
-                "link": f"/{comm.get('target_type', 'passeios')}",
-            })
     except Exception:
         pass
 
-    # Ordenar por mais recentes
     notifications.sort(key=lambda x: str(x.get("created_at") or ""), reverse=True)
     return notifications[:10]
+
 

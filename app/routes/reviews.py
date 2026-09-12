@@ -7,13 +7,14 @@ from app.database import get_db
 from app.models import AdStatus, Tables
 from app.schemas.ads import ReviewCreateRequest, ReviewListResponse, ReviewResponse
 from app.utils.deps import get_current_user, get_optional_user
+from app.utils.notifications import create_notification
 
 router = APIRouter(prefix="/ads/{ad_id}/reviews", tags=["Avaliações"])
 
 
 async def _get_ad(db: AsyncClient, ad_id: str) -> dict:
     result = (
-        await db.table(Tables.ADS).select("id, user_id, status").eq("id", ad_id).limit(1).execute()
+        await db.table(Tables.ADS).select("id, name, user_id, status").eq("id", ad_id).limit(1).execute()
     )
     if not result.data or result.data[0]["status"] == AdStatus.DELETED.value:
         raise HTTPException(status_code=404, detail="Anúncio não encontrado.")
@@ -53,7 +54,23 @@ async def create_review(
     ).execute()
     review = result.data[0]
     review["user_name"] = user.get("name")
+
+    # Notifica o dono do anúncio sobre a nova avaliação
+    ad_owner_id = ad.get("user_id")
+    if ad_owner_id:
+        ad_name = ad.get("name") or "seu anúncio"
+        user_name = user.get("name") or "Um usuário"
+        await create_notification(
+            db=db,
+            user_id=ad_owner_id,
+            title="Nova Avaliação Recebida!",
+            message=f"{user_name} deu nota {payload.rating}★ em \"{ad_name}\".",
+            type="new_review",
+            link=f"/anuncio/{ad_id}",
+        )
+
     return review
+
 
 
 @router.get("", response_model=ReviewListResponse)

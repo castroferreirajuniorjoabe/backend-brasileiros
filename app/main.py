@@ -20,6 +20,7 @@ from app.routes import (
     item_comments,
     job_ads,
     news_carousel,
+    notifications,
     payments,
     pet_posts,
     ranking,
@@ -104,6 +105,7 @@ async def health_check():
 # Rotas públicas + autenticadas
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(notifications.router)
 app.include_router(ads.router)
 app.include_router(reviews.router)
 app.include_router(groups.router)

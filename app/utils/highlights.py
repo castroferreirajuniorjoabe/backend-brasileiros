@@ -77,4 +77,21 @@ async def activate_highlight(
                 .eq("id", ad_id)
                 .execute()
             )
-    return update.data[0] if update.data else ad
+    
+    updated_ad = update.data[0] if update.data else ad
+    # Notifica o usuário que o anúncio está em destaque
+    user_id = updated_ad.get("user_id")
+    if user_id:
+        from app.utils.notifications import create_notification
+        ad_title = updated_ad.get("name") or "seu anúncio"
+        await create_notification(
+            db=db,
+            user_id=user_id,
+            title="Destaque Ativado!",
+            message=f"Seu anúncio \"{ad_title}\" agora está em destaque no topo.",
+            type="highlight_active",
+            link=f"/anuncio/{ad_id}",
+        )
+
+    return updated_ad
+
