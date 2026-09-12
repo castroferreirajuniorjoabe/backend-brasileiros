@@ -589,8 +589,112 @@ async def admin_delete_record(
     record_id: str,
     db: AsyncClient = Depends(get_db),
 ):
-    """Apaga um registro de qualquer tabela gerenciável."""
-    if table not in MANAGEABLE_TABLES:
-        raise HTTPException(status_code=404, detail="Tabela não gerenciável.")
-    await db.table(MANAGEABLE_TABLES[table]).delete().eq("id", record_id).execute()
+    """Apaga um registro de qualquer tabela gerenciável, tratando dependências e chaves estrangeiras."""
+    # Normaliza nomes de tabelas alternativos
+    table_map = {
+        "urgent_ads": Tables.URGENT_ADS,
+        "urgent-ads": Tables.URGENT_ADS,
+        "charity_ads": Tables.CHARITY_ADS,
+        "charity-ads": Tables.CHARITY_ADS,
+        "tourism_spots": Tables.TOURISM_SPOTS,
+        "tourism-spots": Tables.TOURISM_SPOTS,
+        "pet_posts": Tables.PET_POSTS,
+        "pet-posts": Tables.PET_POSTS,
+        "job_ads": Tables.GROUPS,
+        "job-ads": Tables.GROUPS,
+        "jobs": Tables.GROUPS,
+        "arrival-guide": Tables.GROUPS,
+        "arrival_guide": Tables.GROUPS,
+    }
+    actual_table = table_map.get(table) or MANAGEABLE_TABLES.get(table) or table
+
+    # 1. Se for exclusão de ANÚNCIO (ads), limpa registros filhos antes (avaliações, histórico, pagamentos)
+    if actual_table == Tables.ADS:
+        try:
+            await db.table(Tables.REVIEWS).delete().eq("ad_id", record_id).execute()
+        except Exception:
+            pass
+        try:
+            await db.table(Tables.EDIT_HISTORY).delete().eq("ad_id", record_id).execute()
+        except Exception:
+            pass
+        try:
+            await db.table(Tables.PAYMENTS).delete().eq("ad_id", record_id).execute()
+        except Exception:
+            pass
+
+    # 2. Se for exclusão de USUÁRIO (users), limpa anúncios, grupos, avaliações, etc.
+    elif actual_table == Tables.USERS:
+        try:
+            await db.table(Tables.ADMINS).delete().eq("user_id", record_id).execute()
+        except Exception:
+            pass
+        try:
+            await db.table(Tables.NOTIFICATIONS).delete().eq("user_id", record_id).execute()
+        except Exception:
+            pass
+        try:
+            await db.table(Tables.REVIEWS).delete().eq("user_id", record_id).execute()
+        except Exception:
+            pass
+        try:
+            await db.table(Tables.GROUPS).delete().eq("created_by", record_id).execute()
+        except Exception:
+            pass
+        try:
+            await db.table(Tables.URGENT_ADS).delete().eq("user_id", record_id).execute()
+        except Exception:
+            pass
+        try:
+            await db.table(Tables.CHARITY_ADS).delete().eq("user_id", record_id).execute()
+        except Exception:
+            pass
+        try:
+            # Apaga anúncios próprios do usuário
+            my_ads = await db.table(Tables.ADS).select("id").eq("user_id", record_id).execute()
+            for a in my_ads.data or []:
+                try:
+                    await db.table(Tables.REVIEWS).delete().eq("ad_id", a["id"]).execute()
+                    await db.table(Tables.EDIT_HISTORY).delete().eq("ad_id", a["id"]).execute()
+                    await db.table(Tables.PAYMENTS).delete().eq("ad_id", a["id"]).execute()
+                except Exception:
+                    pass
+            await db.table(Tables.ADS).delete().eq("user_id", record_id).execute()
+        except Exception:
+            pass
+
+    # 3. Tenta apagar da tabela alvo principal
+    deleted = False
+    try:
+        res = await db.table(actual_table).delete().eq("id", record_id).execute()
+        if res.data:
+            deleted = True
+    except Exception:
+        pass
+
+    # 4. Fallback especial para Turismo, Pets e Empregos que podem estar salvos em charity_ads ou groups
+    if not deleted:
+        if actual_table in [Tables.TOURISM_SPOTS, Tables.PET_POSTS, "tourism-spots", "pet-posts"]:
+            try:
+                res_c = await db.table(Tables.CHARITY_ADS).delete().eq("id", record_id).execute()
+                if res_c.data:
+                    deleted = True
+            except Exception:
+                pass
+        elif actual_table in ["job_ads", "jobs", "job-ads", "arrival-guide", "arrival_guide"]:
+            try:
+                res_g = await db.table(Tables.GROUPS).delete().eq("id", record_id).execute()
+                if res_g.data:
+                    deleted = True
+            except Exception:
+                pass
+            if not deleted:
+                try:
+                    res_c = await db.table(Tables.CHARITY_ADS).delete().eq("id", record_id).execute()
+                    if res_c.data:
+                        deleted = True
+                except Exception:
+                    pass
+
     return None
+
