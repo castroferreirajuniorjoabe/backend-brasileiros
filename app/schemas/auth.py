@@ -37,6 +37,23 @@ class ResendPhoneCodeRequest(BaseModel):
     pass  # usa o usuário autenticado
 
 
+class GoogleOAuthRequest(BaseModel):
+    credential: str | None = None
+    email: EmailStr | None = None
+    name: str | None = None
+    avatar_url: str | None = None
+    google_id: str | None = None
+
+
+class SendPhoneCodeRequest(BaseModel):
+    phone: str = Field(min_length=8, max_length=20, description="Telefone internacional com DDI (ex: +33612345678 ou +5511999999999)")
+
+
+class VerifyPhoneLoginRequest(BaseModel):
+    phone: str = Field(min_length=8, max_length=20)
+    code: str = Field(min_length=6, max_length=6)
+
+
 # ---------- Usuários ----------
 
 class UserResponse(BaseModel):
