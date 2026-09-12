@@ -313,8 +313,18 @@ async def reject_item(
     return item_data
 
 
+@router.delete("/moderation/{kind}/{item_id}", status_code=204)
+async def delete_moderated_item(
+    kind: str,
+    item_id: str,
+    db: AsyncClient = Depends(get_db),
+):
+    """Exclui permanentemente um item moderável (anúncio, urgência, caridade, etc.)."""
+    return await admin_delete_record(table=kind, record_id=item_id, db=db)
+
 
 # ---------- Usuários ----------
+
 
 @router.get("/users")
 async def list_users(
