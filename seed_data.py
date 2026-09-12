@@ -340,7 +340,7 @@ REAL_TOURISM_SPOTS = [
         "description": "Vila alsaciana encantadora com ruelas medievais preservadas, casas de enxaimel coloridas dos séculos XVI e XVII repletas de flores às margens dos canais do rio Lauch.",
         "tips": "Faça um passeio de barco de madeira nos canais da Petite Venise.",
         "google_maps_url": "https://maps.google.com/?q=Petite+Venise+Colmar",
-        "image_url": "https://images.unsplash.com/photo-1520939817895-060bdef4df1a?auto=format&fit=crop&w=1200&q=80",
+        "image_url": "https://images.unsplash.com/photo-1549144511-f099e773c147?auto=format&fit=crop&w=1200&q=80",
         "image_2_url": "https://images.unsplash.com/photo-1513581166391-887a96ddeafd?auto=format&fit=crop&w=1200&q=80",
     },
     {
