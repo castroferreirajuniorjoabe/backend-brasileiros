@@ -440,14 +440,28 @@ async def list_reports(
     db: AsyncClient = Depends(get_db),
 ):
     """Lista denúncias por status."""
-    result = (
-        await db.table(Tables.REPORTS)
-        .select("*, users!reports_reporter_id_fkey(name, email)")
-        .eq("status", status)
-        .order("created_at")
-        .execute()
-    )
-    return result.data or []
+    try:
+        result = (
+            await db.table(Tables.REPORTS)
+            .select("*, users(name, email)")
+            .eq("status", status)
+            .order("created_at")
+            .execute()
+        )
+        return result.data or []
+    except Exception:
+        try:
+            result = (
+                await db.table(Tables.REPORTS)
+                .select("*")
+                .eq("status", status)
+                .order("created_at")
+                .execute()
+            )
+            return result.data or []
+        except Exception:
+            return []
+
 
 
 @router.post("/reports/{report_id}/resolve")
