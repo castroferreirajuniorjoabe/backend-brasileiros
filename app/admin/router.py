@@ -184,17 +184,59 @@ async def list_pending(
                 .execute()
             )
         elif kind == "moving-sales":
+            all_raw = []
+            # 1. Tabela dedicada moving_sales
             try:
                 res1 = await db.table(table).select("*").eq("status", target_status).order("created_at", desc=True).execute()
-                data1 = res1.data or []
+                if res1.data:
+                    all_raw.extend(res1.data)
             except Exception:
-                data1 = []
+                pass
+
+            # 2. Tabela charity_ads (fallback type=moving_sale ou title contendo MUDANÇA)
             try:
-                res2 = await db.table(Tables.CHARITY_ADS).select("*").or_("type.eq.moving_sale,title.ilike.[MUDANÇA]%").eq("status", target_status).order("created_at", desc=True).execute()
-                data2 = res2.data or []
+                res_c1 = await db.table(Tables.CHARITY_ADS).select("*").eq("type", "moving_sale").eq("status", target_status).order("created_at", desc=True).execute()
+                if res_c1.data:
+                    existing_ids = {str(x.get("id")) for x in all_raw}
+                    for it in res_c1.data:
+                        if str(it.get("id")) not in existing_ids:
+                            all_raw.append(it)
             except Exception:
-                data2 = []
-            return data1 + data2
+                pass
+
+            try:
+                res_c2 = await db.table(Tables.CHARITY_ADS).select("*").ilike("title", "%MUDAN%").eq("status", target_status).order("created_at", desc=True).execute()
+                if res_c2.data:
+                    existing_ids = {str(x.get("id")) for x in all_raw}
+                    for it in res_c2.data:
+                        if str(it.get("id")) not in existing_ids:
+                            all_raw.append(it)
+            except Exception:
+                pass
+
+            # 3. Tabela groups (fallback category moving_sale:% ou name contendo MUDANÇA)
+            try:
+                q_grp = db.table(Tables.GROUPS).select("*").or_("category.ilike.moving_sale:%,name.ilike.%MUDAN%")
+                if target_status == "pending":
+                    q_grp = q_grp.or_("is_approved.eq.false,is_approved.is.null")
+                elif target_status == "approved":
+                    q_grp = q_grp.eq("is_approved", True).eq("is_active", True)
+                elif target_status == "rejected":
+                    q_grp = q_grp.eq("is_approved", False).eq("is_active", False)
+                res_g = await q_grp.order("created_at", desc=True).execute()
+                if res_g.data:
+                    existing_ids = {str(x.get("id")) for x in all_raw}
+                    for it in res_g.data:
+                        if str(it.get("id")) not in existing_ids:
+                            all_raw.append(it)
+            except Exception:
+                pass
+
+            try:
+                from app.routes.moving_sales import _format_moving_sale
+                return [_format_moving_sale(x) for x in all_raw]
+            except Exception:
+                return all_raw
         elif kind == "pet-posts":
             # Busca na tabela PET_POSTS ou registros com type=pet
             try:
@@ -279,7 +321,15 @@ async def approve_item(kind: str, item_id: str, db: AsyncClient = Depends(get_db
                 if not result.data:
                     result = await db.table(Tables.CHARITY_ADS).update({"status": "approved"}).eq("id", item_id).execute()
             except Exception:
-                result = await db.table(Tables.CHARITY_ADS).update({"status": "approved"}).eq("id", item_id).execute()
+                try:
+                    result = await db.table(Tables.CHARITY_ADS).update({"status": "approved"}).eq("id", item_id).execute()
+                except Exception:
+                    result = None
+            if not result or not result.data:
+                try:
+                    result = await db.table(Tables.GROUPS).update({"is_approved": True, "is_active": True}).eq("id", item_id).execute()
+                except Exception:
+                    pass
         else:
             result = await db.table(table).update({"status": status_enum.APPROVED.value}).eq("id", item_id).execute()
     except Exception:
@@ -288,12 +338,12 @@ async def approve_item(kind: str, item_id: str, db: AsyncClient = Depends(get_db
         except Exception:
             result = await db.table(table).update({"is_approved": True, "is_active": True}).eq("id", item_id).execute()
 
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(status_code=404, detail="Item não encontrado.")
     
     item_data = result.data[0]
     # Cria notificação para o dono do item se houver user_id
-    item_user_id = item_data.get("user_id")
+    item_user_id = item_data.get("user_id") or item_data.get("created_by")
     if item_user_id:
         item_title = item_data.get("name") or item_data.get("title") or "item"
         link = f"/anuncio/{item_id}" if kind == "ads" else f"/{kind}"
@@ -351,7 +401,15 @@ async def reject_item(
                 if not result.data:
                     result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
             except Exception:
-                result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
+                try:
+                    result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
+                except Exception:
+                    result = None
+            if not result or not result.data:
+                try:
+                    result = await db.table(Tables.GROUPS).update({"is_approved": False, "is_active": False}).eq("id", item_id).execute()
+                except Exception:
+                    pass
         else:
             result = await db.table(table).update(update).eq("id", item_id).execute()
     except Exception:
@@ -359,11 +417,11 @@ async def reject_item(
         if payload and payload.reason:
             update_fallback["rejection_reason"] = payload.reason
         result = await db.table(table).update(update_fallback).eq("id", item_id).execute()
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(status_code=404, detail="Item não encontrado.")
     
     item_data = result.data[0]
-    item_user_id = item_data.get("user_id")
+    item_user_id = item_data.get("user_id") or item_data.get("created_by")
     if item_user_id:
         item_title = item_data.get("name") or item_data.get("title") or "item"
         reason_msg = f" Motivo: {payload.reason}" if payload and payload.reason else ""
@@ -639,7 +697,7 @@ async def admin_update_record(
     payload: dict,
     db: AsyncClient = Depends(get_db),
 ):
-    """Edita um registro de qualquer tabela gerenciável."""
+    """Edita um registro de qualquer tabela gerenciável com fallback automático."""
     if table not in MANAGEABLE_TABLES:
         raise HTTPException(status_code=404, detail="Tabela não gerenciável.")
     payload.pop("id", None)
@@ -648,13 +706,42 @@ async def admin_update_record(
         payload.pop("password_hash", None)
     if not payload:
         raise HTTPException(status_code=400, detail="Nenhum campo para atualizar.")
-    result = (
-        await db.table(MANAGEABLE_TABLES[table])
-        .update(payload)
-        .eq("id", record_id)
-        .execute()
-    )
-    if not result.data:
+
+    actual_table = MANAGEABLE_TABLES[table]
+    result = None
+    try:
+        res = (
+            await db.table(actual_table)
+            .update(payload)
+            .eq("id", record_id)
+            .execute()
+        )
+        if res.data:
+            result = res
+    except Exception:
+        pass
+
+    if not result or not result.data:
+        if table in ["moving_sales", "moving-sales"]:
+            try:
+                charity_payload = dict(payload)
+                if "city" in charity_payload and "location" not in charity_payload:
+                    charity_payload["location"] = charity_payload.pop("city")
+                res_c = await db.table(Tables.CHARITY_ADS).update(charity_payload).eq("id", record_id).execute()
+                if res_c.data:
+                    result = res_c
+            except Exception:
+                pass
+
+            if not result or not result.data:
+                try:
+                    res_g = await db.table(Tables.GROUPS).update(payload).eq("id", record_id).execute()
+                    if res_g.data:
+                        result = res_g
+                except Exception:
+                    pass
+
+    if not result or not result.data:
         raise HTTPException(status_code=404, detail="Registro não encontrado.")
     return result.data[0]
 
@@ -681,6 +768,8 @@ async def admin_delete_record(
         "jobs": Tables.GROUPS,
         "arrival-guide": Tables.GROUPS,
         "arrival_guide": Tables.GROUPS,
+        "moving_sales": Tables.MOVING_SALES,
+        "moving-sales": Tables.MOVING_SALES,
     }
     actual_table = table_map.get(table) or MANAGEABLE_TABLES.get(table) or table
 
@@ -748,7 +837,7 @@ async def admin_delete_record(
     except Exception:
         pass
 
-    # 4. Fallback especial para Turismo, Pets e Empregos que podem estar salvos em charity_ads ou groups
+    # 4. Fallback especial para Turismo, Pets, Empregos e Mudança
     if not deleted:
         if actual_table in [Tables.TOURISM_SPOTS, Tables.PET_POSTS, "tourism-spots", "pet-posts"]:
             try:
@@ -757,6 +846,20 @@ async def admin_delete_record(
                     deleted = True
             except Exception:
                 pass
+        elif actual_table in [Tables.MOVING_SALES, "moving_sales", "moving-sales"]:
+            try:
+                res_c = await db.table(Tables.CHARITY_ADS).delete().eq("id", record_id).execute()
+                if res_c.data:
+                    deleted = True
+            except Exception:
+                pass
+            if not deleted:
+                try:
+                    res_g = await db.table(Tables.GROUPS).delete().eq("id", record_id).execute()
+                    if res_g.data:
+                        deleted = True
+                except Exception:
+                    pass
         elif actual_table in ["job_ads", "jobs", "job-ads", "arrival-guide", "arrival_guide"]:
             try:
                 res_g = await db.table(Tables.GROUPS).delete().eq("id", record_id).execute()
