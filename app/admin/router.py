@@ -44,6 +44,7 @@ MODERATED = {
     "arrival-guide": (Tables.GROUPS, ModerationStatus),
     "job-ads": (Tables.GROUPS, ModerationStatus),
     "jobs": (Tables.GROUPS, ModerationStatus),
+    "moving-sales": (Tables.MOVING_SALES, ModerationStatus),
 }
 
 # Tabelas gerenciáveis via endpoints genéricos
@@ -66,6 +67,8 @@ MANAGEABLE_TABLES = {
     "admins": Tables.ADMINS,
     "job_ads": Tables.GROUPS,
     "jobs": Tables.GROUPS,
+    "moving_sales": Tables.MOVING_SALES,
+    "moving-sales": Tables.MOVING_SALES,
 }
 
 

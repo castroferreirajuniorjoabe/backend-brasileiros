@@ -20,6 +20,7 @@ from app.routes import (
     groups,
     item_comments,
     job_ads,
+    moving_sales,
     news_carousel,
     notifications,
     payments,
@@ -124,6 +125,7 @@ app.include_router(tourism_spots.router)
 app.include_router(pet_posts.router)
 app.include_router(item_comments.router)
 app.include_router(job_ads.router)
+app.include_router(moving_sales.router)
 app.include_router(news_carousel.router)
 app.include_router(arrival_guide.router)
 app.include_router(gift_codes.router)

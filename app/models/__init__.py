@@ -21,6 +21,7 @@ class Tables:
     EDIT_HISTORY = "edit_history"
     ADMINS = "admins"
     NOTIFICATIONS = "notifications"
+    MOVING_SALES = "moving_sales"
 
 
 class AdType(str, Enum):
@@ -86,4 +87,5 @@ URGENT_AD_EXPIRATION_DAYS = 7
 CHARITY_ADS_PER_WEEK = 1
 HIGHLIGHT_DURATION_DAYS = 7
 RANKING_TOP_REWARDED = 3
+MAX_MOVING_SALES_PER_USER = 5
 
