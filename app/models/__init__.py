@@ -8,6 +8,7 @@ class Tables:
     ADS = "ads"
     REVIEWS = "reviews"
     GROUPS = "groups"
+    ASSOCIATIONS = "associations"
     URGENT_ADS = "urgent_ads"
     CHARITY_ADS = "charity_ads"
     TOURISM_SPOTS = "tourism_spots"

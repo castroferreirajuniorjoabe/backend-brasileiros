@@ -13,6 +13,7 @@ from app.config import settings
 from app.routes import (
     ads,
     arrival_guide,
+    associations,
     auth,
     charity_ads,
     gift_codes,
@@ -116,6 +117,7 @@ app.include_router(notifications.router)
 app.include_router(ads.router)
 app.include_router(reviews.router)
 app.include_router(groups.router)
+app.include_router(associations.router)
 app.include_router(urgent_ads.router)
 app.include_router(charity_ads.router)
 app.include_router(tourism_spots.router)

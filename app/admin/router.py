@@ -36,6 +36,7 @@ router = APIRouter(
 MODERATED = {
     "ads": (Tables.ADS, AdStatus),
     "groups": (Tables.GROUPS, ModerationStatus),
+    "associations": (Tables.ASSOCIATIONS, ModerationStatus),
     "urgent-ads": (Tables.URGENT_ADS, ModerationStatus),
     "charity-ads": (Tables.CHARITY_ADS, ModerationStatus),
     "tourism-spots": (Tables.TOURISM_SPOTS, ModerationStatus),
@@ -51,6 +52,7 @@ MANAGEABLE_TABLES = {
     "ads": Tables.ADS,
     "reviews": Tables.REVIEWS,
     "groups": Tables.GROUPS,
+    "associations": Tables.ASSOCIATIONS,
     "urgent_ads": Tables.URGENT_ADS,
     "charity_ads": Tables.CHARITY_ADS,
     "tourism_spots": Tables.TOURISM_SPOTS,
