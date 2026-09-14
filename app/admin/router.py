@@ -191,6 +191,25 @@ async def list_pending(
             except Exception:
                 data2 = []
             return data1 + data2
+        elif kind == "associations":
+            try:
+                res1 = await db.table(table).select("*").eq("status", target_status).order("created_at", desc=True).execute()
+                data1 = res1.data or []
+            except Exception:
+                data1 = []
+            try:
+                q_grp = db.table(Tables.GROUPS).select("*").ilike("category", "association:%")
+                if target_status == "pending":
+                    q_grp = q_grp.or_("is_approved.eq.false,is_approved.is.null")
+                elif target_status == "approved":
+                    q_grp = q_grp.eq("is_approved", True).eq("is_active", True)
+                elif target_status == "rejected":
+                    q_grp = q_grp.eq("is_approved", False).eq("is_active", False)
+                res2 = await q_grp.order("created_at", desc=True).execute()
+                data2 = res2.data or []
+            except Exception:
+                data2 = []
+            return data1 + data2
         elif kind == "tourism-spots":
             try:
                 res1 = await db.table(table).select("*").eq("status", target_status).order("created_at", desc=True).execute()
@@ -230,6 +249,13 @@ async def approve_item(kind: str, item_id: str, db: AsyncClient = Depends(get_db
                     result = await db.table(Tables.CHARITY_ADS).update({"status": "approved"}).eq("id", item_id).execute()
             except Exception:
                 result = await db.table(Tables.CHARITY_ADS).update({"status": "approved"}).eq("id", item_id).execute()
+        elif kind == "associations":
+            try:
+                result = await db.table(Tables.ASSOCIATIONS).update({"status": "approved", "rejection_reason": None}).eq("id", item_id).execute()
+                if not result.data:
+                    result = await db.table(Tables.GROUPS).update({"is_approved": True, "is_active": True}).eq("id", item_id).execute()
+            except Exception:
+                result = await db.table(Tables.GROUPS).update({"is_approved": True, "is_active": True}).eq("id", item_id).execute()
         else:
             result = await db.table(table).update({"status": status_enum.APPROVED.value}).eq("id", item_id).execute()
     except Exception:
@@ -288,6 +314,13 @@ async def reject_item(
                     result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
             except Exception:
                 result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
+        elif kind == "associations":
+            try:
+                result = await db.table(Tables.ASSOCIATIONS).update(update).eq("id", item_id).execute()
+                if not result.data:
+                    result = await db.table(Tables.GROUPS).update({"is_approved": False, "is_active": False}).eq("id", item_id).execute()
+            except Exception:
+                result = await db.table(Tables.GROUPS).update({"is_approved": False, "is_active": False}).eq("id", item_id).execute()
         else:
             result = await db.table(table).update(update).eq("id", item_id).execute()
     except Exception:
