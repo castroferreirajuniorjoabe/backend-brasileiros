@@ -102,13 +102,14 @@ async def create_group(
 
 @router.get("", response_model=list[GroupResponse])
 async def list_groups(
+    type: Optional[str] = Query(None, description="Filtro por tipo ou plataforma"),
     city: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     platform: Optional[GroupPlatform] = Query(None),
     db: AsyncClient = Depends(get_db),
     _visitor: dict | None = Depends(get_optional_user),
 ):
-    """Lista grupos aprovados com filtros (público). Exclui estritamente mensagens, chegadas, vagas e banners de novidades/patrocínios."""
+    """Lista grupos aprovados de WhatsApp e Facebook (público). Exclui estritamente associações, mensagens, chegadas, vagas e banners."""
     try:
         query = (
             db.table(Tables.GROUPS)
@@ -119,8 +120,13 @@ async def list_groups(
             .not_.like("category", "comment_%")
             .not_.like("category", "job_ad:%")
             .not_.like("category", "news_banner:%")
+            .not_.like("category", "association:%")
+            .not_.like("category", "assoc:%")
+            .not_.like("category", "associacao:%")
+            .not_.like("category", "association")
             .not_.like("name", "[NOVIDADE]%")
             .not_.like("name", "[EMPREGO]%")
+            .not_.like("name", "[ASSOC%")
             .not_.like("invite_link", "chat://%")
             .not_.like("invite_link", "comment://%")
             .not_.like("invite_link", "likes:%")
@@ -132,6 +138,8 @@ async def list_groups(
             query = query.eq("category", category)
         if platform:
             query = query.eq("platform", platform.value)
+        elif type and type.lower() in ["whatsapp", "facebook"]:
+            query = query.eq("platform", type.lower())
         result = await query.order("created_at", desc=True).execute()
         
         filtered = []
@@ -139,11 +147,30 @@ async def list_groups(
             cat = g.get("category") or ""
             inv = g.get("invite_link") or ""
             nm = g.get("name") or ""
-            if cat.startswith("news_banner:") or cat.startswith("job_ad:") or cat.startswith("chat:") or cat.startswith("arrival_") or cat.startswith("comment_"):
+            g_type = g.get("type") or ""
+            if (
+                cat.startswith("news_banner:") or
+                cat.startswith("job_ad:") or
+                cat.startswith("chat:") or
+                cat.startswith("arrival_") or
+                cat.startswith("comment_") or
+                cat.startswith("association:") or
+                cat.startswith("assoc:") or
+                cat.startswith("associacao:") or
+                cat == "association" or
+                g_type == "association"
+            ):
                 continue
-            if inv.startswith("banner:") or inv.startswith("chat://") or inv.startswith("comment://") or inv.startswith("likes:"):
+            if (
+                inv.startswith("banner:") or
+                inv.startswith("chat://") or
+                inv.startswith("comment://") or
+                inv.startswith("likes:") or
+                inv.startswith("https://brasileirosnafranca.com/association") or
+                inv.startswith("https://brasileirosnafranca.com/associacoes")
+            ):
                 continue
-            if nm.startswith("[NOVIDADE]") or nm.startswith("[EMPREGO]"):
+            if nm.startswith("[NOVIDADE]") or nm.startswith("[EMPREGO]") or nm.startswith("[ASSOC"):
                 continue
             filtered.append(_format_group(g))
         return filtered
@@ -156,17 +183,38 @@ async def list_groups(
                 cat = g.get("category") or ""
                 inv = g.get("invite_link") or ""
                 nm = g.get("name") or ""
-                if cat.startswith("news_banner:") or cat.startswith("job_ad:") or cat.startswith("chat:") or cat.startswith("arrival_") or cat.startswith("comment_"):
+                g_type = g.get("type") or ""
+                if (
+                    cat.startswith("news_banner:") or
+                    cat.startswith("job_ad:") or
+                    cat.startswith("chat:") or
+                    cat.startswith("arrival_") or
+                    cat.startswith("comment_") or
+                    cat.startswith("association:") or
+                    cat.startswith("assoc:") or
+                    cat.startswith("associacao:") or
+                    cat == "association" or
+                    g_type == "association"
+                ):
                     continue
-                if inv.startswith("banner:") or inv.startswith("chat://") or inv.startswith("comment://") or inv.startswith("likes:"):
+                if (
+                    inv.startswith("banner:") or
+                    inv.startswith("chat://") or
+                    inv.startswith("comment://") or
+                    inv.startswith("likes:") or
+                    inv.startswith("https://brasileirosnafranca.com/association") or
+                    inv.startswith("https://brasileirosnafranca.com/associacoes")
+                ):
                     continue
-                if nm.startswith("[NOVIDADE]") or nm.startswith("[EMPREGO]"):
+                if nm.startswith("[NOVIDADE]") or nm.startswith("[EMPREGO]") or nm.startswith("[ASSOC"):
                     continue
                 if city and city.lower() not in (g.get("city") or "").lower():
                     continue
                 if category and g.get("category") != category:
                     continue
                 if platform and g.get("platform") != platform.value:
+                    continue
+                if type and type.lower() in ["whatsapp", "facebook"] and g.get("platform") != type.lower():
                     continue
                 items.append(_format_group(g))
             return items
