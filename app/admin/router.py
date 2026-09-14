@@ -168,19 +168,33 @@ async def list_pending(
             else:
                 result = await db.table(table).select("*").not_.like("category", "news_banner:%").not_.like("category", "job_ad:%").not_.like("category", "arrival_%").not_.like("category", "chat:%").not_.like("category", "comment_%").not_.like("name", "[NOVIDADE]%").not_.like("name", "[EMPREGO]%").not_.like("invite_link", "banner:%").not_.like("invite_link", "chat://%").not_.like("invite_link", "comment://%").not_.like("invite_link", "likes:%").eq("is_approved", True).order("created_at", desc=True).execute()
         elif kind == "charity-ads":
-            # Exclui rigorosamente postagens de pets, passeios ou empregos salvos em charity_ads
+            # Exclui rigorosamente postagens de pets, passeios, empregos ou mudança salvos em charity_ads
             result = (
                 await db.table(table)
                 .select("*")
                 .eq("status", target_status)
                 .neq("type", "pet")
                 .neq("type", "tourism")
+                .neq("type", "moving_sale")
                 .not_.like("title", "[PET%")
                 .not_.like("title", "[PASSEIO%")
                 .not_.like("title", "[EMPREGO%")
+                .not_.like("title", "[MUDANÇA%")
                 .order("created_at", desc=True)
                 .execute()
             )
+        elif kind == "moving-sales":
+            try:
+                res1 = await db.table(table).select("*").eq("status", target_status).order("created_at", desc=True).execute()
+                data1 = res1.data or []
+            except Exception:
+                data1 = []
+            try:
+                res2 = await db.table(Tables.CHARITY_ADS).select("*").or_("type.eq.moving_sale,title.ilike.[MUDANÇA]%").eq("status", target_status).order("created_at", desc=True).execute()
+                data2 = res2.data or []
+            except Exception:
+                data2 = []
+            return data1 + data2
         elif kind == "pet-posts":
             # Busca na tabela PET_POSTS ou registros com type=pet
             try:
@@ -259,6 +273,13 @@ async def approve_item(kind: str, item_id: str, db: AsyncClient = Depends(get_db
                     result = await db.table(Tables.GROUPS).update({"is_approved": True, "is_active": True}).eq("id", item_id).execute()
             except Exception:
                 result = await db.table(Tables.GROUPS).update({"is_approved": True, "is_active": True}).eq("id", item_id).execute()
+        elif kind == "moving-sales":
+            try:
+                result = await db.table(Tables.MOVING_SALES).update({"status": "approved", "is_available": True}).eq("id", item_id).execute()
+                if not result.data:
+                    result = await db.table(Tables.CHARITY_ADS).update({"status": "approved"}).eq("id", item_id).execute()
+            except Exception:
+                result = await db.table(Tables.CHARITY_ADS).update({"status": "approved"}).eq("id", item_id).execute()
         else:
             result = await db.table(table).update({"status": status_enum.APPROVED.value}).eq("id", item_id).execute()
     except Exception:
@@ -324,6 +345,13 @@ async def reject_item(
                     result = await db.table(Tables.GROUPS).update({"is_approved": False, "is_active": False}).eq("id", item_id).execute()
             except Exception:
                 result = await db.table(Tables.GROUPS).update({"is_approved": False, "is_active": False}).eq("id", item_id).execute()
+        elif kind == "moving-sales":
+            try:
+                result = await db.table(Tables.MOVING_SALES).update(update).eq("id", item_id).execute()
+                if not result.data:
+                    result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
+            except Exception:
+                result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
         else:
             result = await db.table(table).update(update).eq("id", item_id).execute()
     except Exception:
