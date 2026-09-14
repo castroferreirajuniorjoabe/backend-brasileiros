@@ -108,6 +108,7 @@ async def list_charity_ads(
             .neq("type", "tourism")
             .neq("type", "pet")
             .neq("type", "job")
+            .neq("type", "moving_sale")
             .not_.like("title", "[%]")
         )
         if city:
@@ -118,12 +119,12 @@ async def list_charity_ads(
         clean_items = []
         for a in result.data or []:
             ad_type = str(a.get("type") or "").lower()
-            if ad_type in ["tourism", "pet", "job", "job_ad", "employment"]:
+            if ad_type in ["tourism", "pet", "job", "job_ad", "employment", "moving_sale", "moving"]:
                 continue
             title = str(a.get("title") or "")
             desc = str(a.get("description") or "")
-            # Se tiver prefixo de colchetes ou for remanescente de teste de emprego
-            if (title.startswith("[") and "]" in title) or "[meta_job]" in desc.lower() or "[emprego]" in title.lower():
+            # Se tiver prefixo de colchetes ou for remanescente de teste de emprego ou mudança
+            if (title.startswith("[") and "]" in title) or "[meta_job]" in desc.lower() or "[emprego]" in title.lower() or "moving_meta:" in desc.lower() or "[mudança]" in title.lower() or "[mudanca]" in title.lower():
                 continue
             clean_items.append(_format_charity_ad(a))
             
@@ -135,11 +136,11 @@ async def list_charity_ads(
             filtered = []
             for a in res_all.data or []:
                 ad_type = str(a.get("type") or "").lower()
-                if ad_type in ["tourism", "pet", "job", "job_ad", "employment"]:
+                if ad_type in ["tourism", "pet", "job", "job_ad", "employment", "moving_sale", "moving"]:
                     continue
                 t = str(a.get("title") or "")
                 desc = str(a.get("description") or "")
-                if (t.startswith("[") and "]" in t) or "[meta_job]" in desc.lower() or "[emprego]" in t.lower():
+                if (t.startswith("[") and "]" in t) or "[meta_job]" in desc.lower() or "[emprego]" in t.lower() or "moving_meta:" in desc.lower() or "[mudança]" in t.lower() or "[mudanca]" in t.lower():
                     continue
                 if city and (city.lower() not in (a.get("location") or "").lower() and city.lower() not in (a.get("city") or "").lower()):
                     continue
