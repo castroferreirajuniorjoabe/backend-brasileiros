@@ -56,8 +56,15 @@ async def lifespan(app: FastAPI):
         id="expire_urgent_ads",
         replace_existing=True,
     )
+    # Cron diário: expirar eventos cuja data já passou (+24h)
+    scheduler.add_job(
+        ads.run_scheduled_event_expiration,
+        CronTrigger(hour=4, minute=30),
+        id="expire_passed_events",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Scheduler iniciado (ranking mensal + expiração de urgências).")
+    logger.info("Scheduler iniciado (ranking mensal + expiração de urgências + expiração de eventos passados).")
     yield
     scheduler.shutdown(wait=False)
 

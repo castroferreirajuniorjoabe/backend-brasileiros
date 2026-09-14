@@ -11,6 +11,8 @@ class AdUpdateRequest(BaseModel):
     address: str | None = None
     city: str | None = None
     category: str | None = None
+    type: str | None = None
+    event_date: str | None = None
     phone: str | None = None
     landline_phone: str | None = None
     email: str | None = None
@@ -28,6 +30,8 @@ class AdResponse(BaseModel):
     address: str
     city: str
     category: str
+    type: str | None = "service"
+    event_date: str | None = None
     phone: str
     landline_phone: str | None = None
     email: str

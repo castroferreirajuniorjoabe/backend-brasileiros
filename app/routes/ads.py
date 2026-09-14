@@ -19,7 +19,7 @@ router = APIRouter(prefix="/ads", tags=["Anúncios"])
 # ---------- helpers ----------
 
 async def _attach_ratings(db: AsyncClient, ads: list[dict]) -> list[dict]:
-    """Agrega média e total de avaliações aos anúncios listados."""
+    """Agrega média e total de avaliações aos anúncios listados e normaliza type/event_date."""
     if not ads:
         return ads
     ad_ids = [ad["id"] for ad in ads]
@@ -40,6 +40,12 @@ async def _attach_ratings(db: AsyncClient, ads: list[dict]) -> list[dict]:
             ad["image_url_2"] = ad.get("image_2_url")
         if "business_hours" in ad and "opening_hours" not in ad:
             ad["opening_hours"] = ad.get("business_hours")
+        # Normalização rigorosa do tipo: 'service' ou 'event'
+        if not ad.get("type"):
+            if ad.get("category") == "eventos" or ad.get("event_date"):
+                ad["type"] = "event"
+            else:
+                ad["type"] = "service"
     return ads
 
 
@@ -60,6 +66,8 @@ async def create_ad(
     address: str = Form(...),
     city: str = Form(...),
     category: str = Form(...),
+    type: Optional[str] = Form("service", description="service ou event"),
+    event_date: Optional[str] = Form(None, description="Data e hora do evento (se for evento)"),
     phone: str = Form(...),
     landline_phone: Optional[str] = Form(None),
     email: str = Form(...),
@@ -73,17 +81,9 @@ async def create_ad(
     user: dict = Depends(get_current_verified_user),
     db: AsyncClient = Depends(get_db),
 ):
-    """Cria anúncio. O 1º anúncio do usuário vai para moderação manual;
-    os seguintes são aprovados automaticamente (sujeitos a denúncias)."""
-    previous = (
-        await db.table(Tables.ADS)
-        .select("id")
-        .eq("user_id", user["id"])
-        .neq("status", AdStatus.DELETED.value)
-        .limit(1)
-        .execute()
-    )
-    is_first_ad = not previous.data
+    """Cria anúncio comercial (serviço) ou evento temporário."""
+    clean_type = "event" if (category == "eventos" or (type and type.strip().lower() == "event")) else "service"
+    clean_event_date = event_date.strip() if event_date and clean_type == "event" else None
 
     image_url = await image_utils.upload_image(image, folder="ads")
     image_url_2 = (
@@ -100,6 +100,8 @@ async def create_ad(
         "address": address,
         "city": city,
         "category": category,
+        "type": clean_type,
+        "event_date": clean_event_date,
         "phone": phone,
         "email": email,
         "description": description,
@@ -111,13 +113,30 @@ async def create_ad(
         "is_highlighted": False,
     }
 
-    # Compatibilidade com colunas do banco (image_2_url / image_url_2 / business_hours / opening_hours / landline_phone)
+    # Compatibilidade com colunas do banco
     insert_attempts = [
         {**record, "image_2_url": image_url_2, "business_hours": opening_hours, "landline_phone": clean_landline},
         {**record, "image_url_2": image_url_2, "opening_hours": opening_hours, "landline_phone": clean_landline},
         {**record, "image_2_url": image_url_2, "business_hours": opening_hours},
         {**record, "image_url_2": image_url_2, "opening_hours": opening_hours},
         record,
+        # Fallback sem colunas extras se não existirem
+        {
+            "user_id": user["id"],
+            "name": name,
+            "address": address,
+            "city": city,
+            "category": category,
+            "phone": phone,
+            "email": email,
+            "description": description,
+            "website": website,
+            "instagram": instagram,
+            "facebook": facebook,
+            "image_url": image_url,
+            "status": AdStatus.APPROVED.value if user.get("is_admin") else AdStatus.PENDING.value,
+            "is_highlighted": False,
+        }
     ]
 
     result = None
@@ -134,6 +153,8 @@ async def create_ad(
 
     ad = result.data[0]
     ad.update({
+        "type": clean_type,
+        "event_date": clean_event_date,
         "average_rating": None,
         "reviews_count": 0,
         "image_url_2": ad.get("image_2_url") or ad.get("image_url_2"),
@@ -147,6 +168,7 @@ async def create_ad(
 
 @router.get("", response_model=AdListResponse)
 async def list_ads(
+    type: Optional[str] = Query(None, description="Filtro por tipo: service ou event"),
     city: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     search: Optional[str] = Query(None, description="Busca por nome/descrição"),
@@ -156,8 +178,8 @@ async def list_ads(
     db: AsyncClient = Depends(get_db),
     _visitor: dict | None = Depends(get_optional_user),
 ):
-    """Lista anúncios aprovados (público — visitantes navegam sem login).
-    Destacados aparecem primeiro."""
+    """Lista anúncios aprovados (público). Destacados aparecem primeiro.
+    Suporta separação estrita entre serviços contínuos e eventos com data."""
     query = (
         db.table(Tables.ADS)
         .select("*", count="exact")
@@ -169,7 +191,6 @@ async def list_ads(
         query = query.eq("category", category)
     search_term = (search or q or "").strip()
     if search_term:
-        # Busca flexível por nome, descrição, categoria, cidade ou endereço
         query = query.or_(
             f"name.ilike.%{search_term}%,"
             f"description.ilike.%{search_term}%,"
@@ -178,25 +199,58 @@ async def list_ads(
             f"address.ilike.%{search_term}%"
         )
 
+    # Executa consulta ordenada
     start = (page - 1) * page_size
     query = (
         query.order("is_highlighted", desc=True)
         .order("created_at", desc=True)
-        .range(start, start + page_size - 1)
     )
     result = await query.execute()
-    items = await _attach_ratings(db, result.data or [])
+    raw_items = await _attach_ratings(db, result.data or [])
+
+    # Filtro em memória robusto para garantir separação de tipos e expiração
+    now_cutoff = (utcnow() - timedelta(hours=24)).isoformat()
+    filtered_items = []
+    for item in raw_items:
+        item_type = item.get("type", "service")
+        item_category = item.get("category", "")
+        item_event_date = item.get("event_date")
+
+        # Se for evento, verificar se não expirou
+        if item_type == "event" or item_category == "eventos":
+            if item_event_date:
+                try:
+                    ev_clean = item_event_date.replace("Z", "+00:00")
+                    if ev_clean < now_cutoff:
+                        continue  # Evento expirado
+                except Exception:
+                    pass
+
+        # Aplica filtro de tipo solicitado
+        if type == "service":
+            if item_type == "service" and item_category != "eventos":
+                filtered_items.append(item)
+        elif type == "event":
+            if item_type == "event" or item_category == "eventos":
+                filtered_items.append(item)
+        else:
+            filtered_items.append(item)
+
+    total_count = len(filtered_items)
+    paged_items = filtered_items[start : start + page_size]
+
     return AdListResponse(
-        total=result.count or 0, page=page, page_size=page_size, items=items
+        total=total_count, page=page, page_size=page_size, items=paged_items
     )
 
 
 @router.get("/highlighted", response_model=list[AdResponse])
 async def list_highlighted(
+    type: Optional[str] = Query(None, description="Filtro por tipo: service ou event"),
     db: AsyncClient = Depends(get_db),
     _visitor: dict | None = Depends(get_optional_user),
 ):
-    """Carrossel de anúncios em destaque (público)."""
+    """Carrossel de anúncios em destaque (público), respeitando separação de tipo."""
     result = (
         await db.table(Tables.ADS)
         .select("*")
@@ -205,7 +259,12 @@ async def list_highlighted(
         .order("created_at", desc=True)
         .execute()
     )
-    return await _attach_ratings(db, result.data or [])
+    items = await _attach_ratings(db, result.data or [])
+    if type == "service":
+        items = [i for i in items if i.get("type") == "service" and i.get("category") != "eventos"]
+    elif type == "event":
+        items = [i for i in items if i.get("type") == "event" or i.get("category") == "eventos"]
+    return items
 
 
 @router.post("/{ad_id}/highlight", response_model=AdResponse)
@@ -351,4 +410,42 @@ async def delete_ad(
             .execute()
         )
     return None
+
+
+# ---------- rotina de expiração de eventos ----------
+
+async def expire_passed_events(db: AsyncClient) -> int:
+    """Expira eventos cuja data do evento já passou há mais de 24 horas.
+    Anúncios de serviços contínuos/comerciais NUNCA são afetados."""
+    try:
+        cutoff = (utcnow() - timedelta(hours=24)).isoformat()
+        res = (
+            await db.table(Tables.ADS)
+            .select("id, name, event_date, type, category")
+            .in_("status", [AdStatus.APPROVED.value, AdStatus.PENDING.value])
+            .execute()
+        )
+        expired_count = 0
+        for item in res.data or []:
+            is_event = item.get("type") == "event" or item.get("category") == "eventos"
+            ev_date = item.get("event_date")
+            if is_event and ev_date:
+                try:
+                    ev_dt = ev_date.replace("Z", "+00:00")
+                    if ev_dt < cutoff:
+                        await db.table(Tables.ADS).update({"status": AdStatus.EXPIRED.value}).eq("id", item["id"]).execute()
+                        expired_count += 1
+                except Exception:
+                    pass
+        return expired_count
+    except Exception:
+        return 0
+
+
+async def run_scheduled_event_expiration() -> None:
+    """Ponto de entrada do cron diário para expirar eventos passados."""
+    from app.database import get_service_db
+    db = await get_service_db()
+    await expire_passed_events(db)
+
 

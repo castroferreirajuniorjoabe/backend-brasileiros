@@ -22,11 +22,17 @@ class Tables:
     NOTIFICATIONS = "notifications"
 
 
+class AdType(str, Enum):
+    SERVICE = "service"      # Anúncio comercial / profissional fixo (não expira)
+    EVENT = "event"          # Evento ou festa temporária (com data específica, expira após realização)
+
+
 class AdStatus(str, Enum):
     PENDING = "pending"      # aguardando moderação
     APPROVED = "approved"    # visível
     REJECTED = "rejected"
     DELETED = "deleted"      # soft delete
+    EXPIRED = "expired"      # expirado (eventos passados)
 
 
 class ModerationStatus(str, Enum):
