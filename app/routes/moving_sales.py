@@ -24,15 +24,22 @@ router = APIRouter(prefix="/moving-sales", tags=["Mudança & Vendas"])
 
 
 def _format_moving_sale(item: dict) -> dict:
-    """Normaliza o objeto retornado do banco, suportando tanto moving_sales quanto o fallback em charity_ads."""
+    """Normaliza o objeto retornado do banco, suportando moving_sales, charity_ads ou groups."""
     m = dict(item)
     raw_desc = m.get("description") or ""
 
     category = m.get("category") or "Móveis"
+    if category.startswith("moving_sale:"):
+        category = category.replace("moving_sale:", "").strip()
+
     condition = m.get("condition") or "usado"
     price = float(m.get("price") or 0.0)
     address = m.get("address")
     phone = m.get("phone") or m.get("contact_phone") or ""
+
+    link = m.get("invite_link") or m.get("link") or ""
+    if not phone and link.startswith("tel:"):
+        phone = link.replace("tel:", "").strip()
 
     clean_title = (m.get("title") or m.get("name") or "Item de Mudança")
     clean_title = clean_title.replace("[MUDANÇA] ", "").replace("[MUDANCA] ", "").strip()
@@ -65,25 +72,37 @@ def _format_moving_sale(item: dict) -> dict:
     elif not isinstance(imgs, list):
         imgs = []
 
-    # Fallback para colunas de imagens unitárias
-    if not imgs and m.get("image_url"):
-        imgs = [m.get("image_url")]
-        if m.get("image_url_2") or m.get("image_2_url"):
-            imgs.append(m.get("image_url_2") or m.get("image_2_url"))
+    # Fallback para colunas de imagens legadas
+    if not imgs:
+        if m.get("image_url"):
+            imgs.append(m.get("image_url"))
+        elif m.get("logo_url"):
+            imgs.append(m.get("logo_url"))
+        if m.get("image_2_url") or m.get("image_url_2"):
+            imgs.append(m.get("image_2_url") or m.get("image_url_2"))
+
+    item_status = m.get("status")
+    if not item_status:
+        if m.get("is_approved") is True:
+            item_status = "approved"
+        elif m.get("is_active") is False:
+            item_status = "rejected"
+        else:
+            item_status = "pending"
 
     m["id"] = str(m.get("id"))
-    m["user_id"] = str(m.get("user_id") or "")
+    m["user_id"] = str(m.get("user_id") or m.get("created_by") or "")
     m["title"] = clean_title
     m["description"] = clean_desc
     m["images"] = [img for img in imgs if img]
     m["price"] = price
-    m["city"] = m.get("city") or "França"
+    m["city"] = m.get("city") or m.get("location") or "França"
     m["address"] = address
     m["phone"] = phone
     m["category"] = category
     m["condition"] = condition
-    m["status"] = m.get("status") or "pending"
-    m["is_available"] = bool(m.get("is_available", True)) and m["status"] != "sold"
+    m["status"] = item_status
+    m["is_available"] = bool(m.get("is_available", True)) and item_status != "sold"
     return m
 
 
@@ -107,7 +126,7 @@ async def create_moving_sale(
     user: dict = Depends(get_current_user),
     db: AsyncClient = Depends(get_db),
 ):
-    """Cria um anúncio de desapego / mudança (com fallback resiliente)."""
+    """Cria um anúncio de desapego / mudança (com fallback resiliente multi-tabelas)."""
     # 1. Validação de limite por usuário
     try:
         count = 0
@@ -122,15 +141,18 @@ async def create_moving_sale(
             )
             count = res_count.count if res_count.count is not None else len(res_count.data or [])
         except Exception:
-            res_count = (
-                await db.table(Tables.CHARITY_ADS)
-                .select("id", count="exact")
-                .eq("user_id", user["id"])
-                .ilike("title", "[MUDANÇA]%")
-                .in_("status", ["pending", "approved"])
-                .execute()
-            )
-            count = res_count.count if res_count.count is not None else len(res_count.data or [])
+            try:
+                res_count = (
+                    await db.table(Tables.CHARITY_ADS)
+                    .select("id", count="exact")
+                    .eq("user_id", user["id"])
+                    .ilike("title", "[MUDANÇA]%")
+                    .in_("status", ["pending", "approved"])
+                    .execute()
+                )
+                count = res_count.count if res_count.count is not None else len(res_count.data or [])
+            except Exception:
+                pass
 
         if count >= MAX_MOVING_SALES_PER_USER and not user.get("is_admin"):
             raise HTTPException(
@@ -166,7 +188,7 @@ async def create_moving_sale(
     clean_address = address.strip() if address and address.strip() else None
 
     # Tentativa 1: Inserção na tabela dedicada `moving_sales`
-    record = {
+    record_main = {
         "user_id": user["id"],
         "title": title.strip(),
         "description": description.strip(),
@@ -182,13 +204,13 @@ async def create_moving_sale(
     }
 
     try:
-        res = await db.table(Tables.MOVING_SALES).insert(record).execute()
+        res = await db.table(Tables.MOVING_SALES).insert(record_main).execute()
         if res.data:
             return _format_moving_sale(res.data[0])
     except Exception as e1:
         logger.debug(f"Tentativa 1 insert em moving_sales falhou: {e1}")
         try:
-            record_str = dict(record)
+            record_str = dict(record_main)
             record_str["images"] = json.dumps(uploaded_images)
             res = await db.table(Tables.MOVING_SALES).insert(record_str).execute()
             if res.data:
@@ -196,7 +218,7 @@ async def create_moving_sale(
         except Exception:
             pass
 
-    # Tentativa 2 (Fallback resiliente): Inserção na tabela `charity_ads`
+    # Tentativa 2 (Fallback resiliente): Inserção na tabela `charity_ads` usando coluna `location`
     meta_dict = {
         "category": clean_category,
         "condition": clean_condition,
@@ -207,44 +229,67 @@ async def create_moving_sale(
     }
     encoded_desc = f"MOVING_META:{json.dumps(meta_dict)}\n---DESC---\n{description.strip()}"
 
-    charity_record = {
-        "user_id": user["id"],
-        "title": f"[MUDANÇA] {title.strip()}",
-        "description": encoded_desc,
-        "city": city.strip(),
-        "contact_phone": phone.strip(),
-        "image_url": uploaded_images[0] if len(uploaded_images) > 0 else None,
-        "image_url_2": uploaded_images[1] if len(uploaded_images) > 1 else None,
-        "status": status_val,
-        "type": "moving_sale",
-    }
+    charity_attempts = [
+        {
+            "user_id": user["id"],
+            "title": f"[MUDANÇA] {title.strip()}",
+            "description": encoded_desc,
+            "location": city.strip(),
+            "contact_phone": phone.strip(),
+            "image_url": uploaded_images[0] if len(uploaded_images) > 0 else None,
+            "image_2_url": uploaded_images[1] if len(uploaded_images) > 1 else None,
+            "status": status_val,
+            "type": "moving_sale",
+        },
+        {
+            "user_id": user["id"],
+            "title": f"[MUDANÇA] {title.strip()}",
+            "description": encoded_desc,
+            "location": city.strip(),
+            "contact_phone": phone.strip(),
+            "image_url": uploaded_images[0] if len(uploaded_images) > 0 else None,
+            "image_2_url": uploaded_images[1] if len(uploaded_images) > 1 else None,
+            "status": status_val,
+        },
+        {
+            "user_id": user["id"],
+            "title": f"[MUDANÇA] {title.strip()}",
+            "description": encoded_desc,
+            "location": city.strip(),
+            "contact_phone": phone.strip(),
+            "status": status_val,
+        }
+    ]
 
-    try:
-        res_charity = await db.table(Tables.CHARITY_ADS).insert(charity_record).execute()
-        if res_charity.data:
-            return _format_moving_sale(res_charity.data[0])
-    except Exception as e2:
+    for c_att in charity_attempts:
         try:
-            charity_simple = {
-                "user_id": user["id"],
-                "title": f"[MUDANÇA] {title.strip()}",
-                "description": encoded_desc,
-                "city": city.strip(),
-                "contact_phone": phone.strip(),
-                "image_url": uploaded_images[0] if len(uploaded_images) > 0 else None,
-                "image_url_2": uploaded_images[1] if len(uploaded_images) > 1 else None,
-                "status": status_val,
-            }
-            res_simple = await db.table(Tables.CHARITY_ADS).insert(charity_simple).execute()
-            if res_simple.data:
-                return _format_moving_sale(res_simple.data[0])
-        except Exception as e3:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Erro ao salvar anúncio de mudança: {str(e3)}",
-            )
+            res_c = await db.table(Tables.CHARITY_ADS).insert(c_att).execute()
+            if res_c.data:
+                return _format_moving_sale(res_c.data[0])
+        except Exception as e_c:
+            logger.debug(f"Tentativa insert charity_ads falhou: {e_c}")
 
-    raise HTTPException(status_code=500, detail="Não foi possível criar o anúncio de mudança.")
+    # Tentativa 3 (Fallback na tabela `groups`):
+    try:
+        group_fallback = {
+            "name": f"[MUDANÇA] {title.strip()}",
+            "platform": "whatsapp",
+            "invite_link": f"tel:{phone.strip()}",
+            "city": city.strip(),
+            "category": f"moving_sale:{clean_category}",
+            "description": encoded_desc,
+            "logo_url": uploaded_images[0] if uploaded_images else None,
+            "is_approved": bool(user.get("is_admin")),
+            "is_active": True,
+            "created_by": user["id"],
+        }
+        res_g = await db.table(Tables.GROUPS).insert(group_fallback).execute()
+        if res_g.data:
+            return _format_moving_sale(res_g.data[0])
+    except Exception as e_g:
+        logger.error(f"Erro em fallback groups: {e_g}")
+
+    raise HTTPException(status_code=500, detail="Não foi possível salvar o anúncio de mudança.")
 
 
 # ---------- LISTAGEM PÚBLICA ----------
@@ -291,9 +336,27 @@ async def list_moving_sales(
             .execute()
         )
         if res_fallback.data:
-            # Evita duplicatas se algum ID já veio da tabela principal
             existing_ids = {str(x.get("id")) for x in all_raw}
             for item in res_fallback.data:
+                if str(item.get("id")) not in existing_ids:
+                    all_raw.append(item)
+    except Exception:
+        pass
+
+    # 3. Busca na tabela groups (fallback)
+    try:
+        res_grp = (
+            await db.table(Tables.GROUPS)
+            .select("*")
+            .eq("is_approved", True)
+            .eq("is_active", True)
+            .or_("category.ilike.moving_sale:%,name.ilike.[MUDANÇA]%")
+            .order("created_at", desc=True)
+            .execute()
+        )
+        if res_grp.data:
+            existing_ids = {str(x.get("id")) for x in all_raw}
+            for item in res_grp.data:
                 if str(item.get("id")) not in existing_ids:
                     all_raw.append(item)
     except Exception:
@@ -380,6 +443,23 @@ async def list_my_moving_sales(
     except Exception:
         pass
 
+    try:
+        res3 = (
+            await db.table(Tables.GROUPS)
+            .select("*")
+            .eq("created_by", user["id"])
+            .or_("category.ilike.moving_sale:%,name.ilike.[MUDANÇA]%")
+            .order("created_at", desc=True)
+            .execute()
+        )
+        if res3.data:
+            existing_ids = {str(x.get("id")) for x in all_raw}
+            for it in res3.data:
+                if str(it.get("id")) not in existing_ids:
+                    all_raw.append(it)
+    except Exception:
+        pass
+
     return [_format_moving_sale(it) for it in all_raw]
 
 
@@ -402,9 +482,17 @@ async def get_moving_sale_detail(
 
     if not item:
         try:
-            res_fallback = await db.table(Tables.CHARITY_ADS).select("*").eq("id", sale_id).limit(1).execute()
-            if res_fallback.data:
-                item = res_fallback.data[0]
+            res_c = await db.table(Tables.CHARITY_ADS).select("*").eq("id", sale_id).limit(1).execute()
+            if res_c.data:
+                item = res_c.data[0]
+        except Exception:
+            pass
+
+    if not item:
+        try:
+            res_g = await db.table(Tables.GROUPS).select("*").eq("id", sale_id).limit(1).execute()
+            if res_g.data:
+                item = res_g.data[0]
         except Exception:
             pass
 
@@ -474,6 +562,23 @@ async def mark_moving_sale_as_sold(
     except Exception:
         pass
 
+    # 3. Tenta atualizar em groups
+    try:
+        res_g = await db.table(Tables.GROUPS).select("*").eq("id", sale_id).limit(1).execute()
+        if res_g.data:
+            existing = res_g.data[0]
+            if existing.get("created_by") != user["id"] and not user.get("is_admin"):
+                raise HTTPException(status_code=403, detail="Permissão negada.")
+            up_g = await db.table(Tables.GROUPS).update({"is_active": False}).eq("id", sale_id).execute()
+            if up_g.data:
+                res_sold = dict(up_g.data[0])
+                res_sold["status"] = "sold"
+                return _format_moving_sale(res_sold)
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     raise HTTPException(status_code=404, detail="Anúncio não encontrado.")
 
 
@@ -506,6 +611,19 @@ async def delete_moving_sale(
                 if res_c.data[0].get("user_id") != user["id"] and not user.get("is_admin"):
                     raise HTTPException(status_code=403, detail="Permissão negada.")
                 await db.table(Tables.CHARITY_ADS).delete().eq("id", sale_id).execute()
+                deleted = True
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+    if not deleted:
+        try:
+            res_g = await db.table(Tables.GROUPS).select("created_by").eq("id", sale_id).limit(1).execute()
+            if res_g.data:
+                if res_g.data[0].get("created_by") != user["id"] and not user.get("is_admin"):
+                    raise HTTPException(status_code=403, detail="Permissão negada.")
+                await db.table(Tables.GROUPS).delete().eq("id", sale_id).execute()
                 deleted = True
         except HTTPException:
             raise
