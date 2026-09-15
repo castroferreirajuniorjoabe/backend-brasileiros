@@ -24,6 +24,10 @@ class Tables:
     MOVING_SALES = "moving_sales"
     ARTISTS = "artists"
     ARTIST_EVENTS = "artist_events"
+    REGULATION_POSTS = "regulation_posts"
+    REGULATION_REPLIES = "regulation_replies"
+    REGULATION_LIKES = "regulation_likes"
+    REGULATION_REPORTS = "regulation_reports"
 
 
 class AdType(str, Enum):
@@ -91,4 +95,6 @@ HIGHLIGHT_DURATION_DAYS = 7
 RANKING_TOP_REWARDED = 3
 MAX_MOVING_SALES_PER_USER = 5
 MAX_ARTISTS_PER_USER = 3
+MAX_REGULATION_POSTS_PER_DAY = 5
+MAX_REGULATION_REPLIES_PER_DAY = 10
 

@@ -46,6 +46,8 @@ MODERATED = {
     "jobs": (Tables.GROUPS, ModerationStatus),
     "moving-sales": (Tables.MOVING_SALES, ModerationStatus),
     "artists": (Tables.ARTISTS, ModerationStatus),
+    "regulation-posts": (Tables.REGULATION_POSTS, ModerationStatus),
+    "regulation_posts": (Tables.REGULATION_POSTS, ModerationStatus),
 }
 
 # Tabelas gerenciáveis via endpoints genéricos
@@ -72,6 +74,10 @@ MANAGEABLE_TABLES = {
     "moving-sales": Tables.MOVING_SALES,
     "artists": Tables.ARTISTS,
     "artist_events": Tables.ARTIST_EVENTS,
+    "regulation_posts": Tables.REGULATION_POSTS,
+    "regulation-posts": Tables.REGULATION_POSTS,
+    "regulation_replies": Tables.REGULATION_REPLIES,
+    "regulation_reports": Tables.REGULATION_REPORTS,
 }
 
 
