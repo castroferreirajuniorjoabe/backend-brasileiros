@@ -313,16 +313,35 @@ async def google_auth(payload: GoogleOAuthRequest, db: AsyncClient = Depends(get
                 "is_blocked": False,
                 "avatar_url": avatar_url,
             }
-            # Tenta inserir com referral_code, cai sem ele se a coluna não existir
-            try:
-                referral_code = generate_gift_code("REF")
-                res_ins = await db.table(Tables.USERS).insert({**new_record, "referral_code": referral_code}).execute()
-            except Exception:
+
+            # Estratégia de inserção robusta para produção:
+            # 1. Tenta sem referral_code (mais seguro — funciona mesmo se coluna não existir)
+            # 2. Tenta com referral_code (colunas que existem no banco local e produção)
+            res_ins = None
+            last_error = None
+
+            for attempt, record in enumerate([
+                new_record,                                        # sem referral_code
+                {**new_record, "referral_code": generate_gift_code("REF")},  # com referral_code
+            ]):
                 try:
-                    res_ins = await db.table(Tables.USERS).insert(new_record).execute()
-                except Exception as insert_err:
-                    logger.error(f"[google_auth] Erro ao inserir usuário Google: {insert_err}")
-                    raise HTTPException(status_code=500, detail=f"Erro ao criar conta: {str(insert_err)}")
+                    res_ins = await db.table(Tables.USERS).insert(record).execute()
+                    if res_ins.data:
+                        break  # sucesso, sai do loop
+                    last_error = f"INSERT retornou dados vazios (tentativa {attempt + 1})"
+                    res_ins = None
+                except Exception as ins_err:
+                    last_error = f"tentativa {attempt + 1}: {type(ins_err).__name__}: {ins_err}"
+                    logger.warning(f"[google_auth] INSERT {last_error}")
+                    res_ins = None
+
+            if res_ins is None or not res_ins.data:
+                logger.error(f"[google_auth] Falha ao criar usuário Google ({email_clean}): {last_error}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Não foi possível criar a conta Google. {last_error}"
+                )
+
             user = res_ins.data[0]
 
         token = create_access_token(user["id"], user.get("is_admin", False))
@@ -333,6 +352,7 @@ async def google_auth(payload: GoogleOAuthRequest, db: AsyncClient = Depends(get
     except Exception as e:
         logger.error(f"[google_auth] Erro inesperado para {email_clean}: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=f"Erro interno ao autenticar com Google: {str(e)}")
+
 
 
 @router.post("/phone/send-code")

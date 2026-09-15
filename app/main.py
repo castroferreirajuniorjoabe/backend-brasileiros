@@ -5,8 +5,9 @@ from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.admin.router import router as admin_router
 from app.config import settings
@@ -97,6 +98,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ──────────────────────────────────────────────────────────────
+# Handler global: garante que erros 500 não-tratados retornem
+# JSON com CORS correto (sem ele, o navegador bloqueia a resposta
+# e o frontend só vê "Network Error" em vez da mensagem real).
+# ──────────────────────────────────────────────────────────────
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    import traceback
+    logger.error(
+        f"[UNHANDLED] {request.method} {request.url.path} → "
+        f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Erro interno do servidor: {type(exc).__name__}: {exc}"},
+    )
 
 
 @app.api_route("/", methods=["GET", "HEAD"], tags=["Sistema"])
