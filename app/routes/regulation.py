@@ -356,6 +356,7 @@ async def get_regulation_post_detail(
     visitor: Optional[dict] = Depends(get_optional_user),
 ):
     """Retorna o detalhe de uma publicação com suas respostas e indicação de melhor resposta."""
+    post_data = None
     try:
         res = (
             await db.table(Tables.REGULATION_POSTS)
@@ -364,90 +365,139 @@ async def get_regulation_post_detail(
             .limit(1)
             .execute()
         )
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Publicação não encontrada.")
-
-        post_data = res.data[0]
-
-        # Verifica curtida no post
-        has_liked_post = False
-        if visitor:
-            try:
-                res_lk = (
-                    await db.table(Tables.REGULATION_LIKES)
-                    .select("id")
-                    .eq("user_id", visitor["id"])
-                    .eq("target_type", "post")
-                    .eq("target_id", post_id)
-                    .limit(1)
-                    .execute()
-                )
-                has_liked_post = bool(res_lk.data)
-            except Exception:
-                pass
-
-        # Busca respostas
-        replies_raw = []
+        if res.data:
+            post_data = res.data[0]
+    except Exception as e_post:
+        logger.warning(f"Tentativa 1 select regulation_posts falhou: {e_post}")
         try:
-            res_rep = (
-                await db.table(Tables.REGULATION_REPLIES)
-                .select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)")
-                .eq("post_id", post_id)
-                .neq("status", "deleted")
-                .order("is_best_answer", desc=True)
-                .order("likes_count", desc=True)
-                .order("created_at", desc=False)
+            res_simple = await db.table(Tables.REGULATION_POSTS).select("*").eq("id", post_id).limit(1).execute()
+            if res_simple.data:
+                post_data = res_simple.data[0]
+        except Exception as e_simple:
+            logger.warning(f"Tentativa 2 select regulation_posts falhou: {e_simple}")
+
+    # Fallback na tabela charity_ads se salvo via fallback
+    if not post_data:
+        try:
+            res_c = await db.table(Tables.CHARITY_ADS).select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)").eq("id", post_id).limit(1).execute()
+            if res_c.data:
+                c_item = res_c.data[0]
+                desc = c_item.get("description") or ""
+                real_type = "question"
+                real_cat = "vistos"
+                real_desc = desc
+                images = []
+                if "REGULATION_META:" in desc and "---DESC---" in desc:
+                    parts = desc.split("---DESC---")
+                    meta_str = parts[0].replace("REGULATION_META:", "").strip()
+                    try:
+                        m_obj = json.loads(meta_str)
+                        real_type = m_obj.get("type") or "question"
+                        real_cat = m_obj.get("category") or "vistos"
+                        images = m_obj.get("images") or []
+                    except Exception:
+                        pass
+                    real_desc = parts[1].strip() if len(parts) > 1 else desc
+                
+                title = (c_item.get("title") or "").replace("[QUESTION]", "").replace("[TIP]", "").strip()
+                post_data = {
+                    "id": c_item.get("id"),
+                    "user_id": c_item.get("user_id"),
+                    "type": real_type,
+                    "category": real_cat,
+                    "title": title,
+                    "content": real_desc,
+                    "images": images or ([c_item.get("image_url")] if c_item.get("image_url") else []),
+                    "likes_count": 0,
+                    "replies_count": 0,
+                    "is_solved": False,
+                    "users": c_item.get("users"),
+                    "created_at": c_item.get("created_at"),
+                }
+        except Exception as e_cf:
+            logger.warning(f"Fallback charity_ads lookup falhou: {e_cf}")
+
+    if not post_data:
+        raise HTTPException(status_code=404, detail="Publicação não encontrada.")
+
+    # Verifica curtida no post
+    has_liked_post = False
+    if visitor:
+        try:
+            res_lk = (
+                await db.table(Tables.REGULATION_LIKES)
+                .select("id")
+                .eq("user_id", visitor["id"])
+                .eq("target_type", "post")
+                .eq("target_id", post_id)
+                .limit(1)
                 .execute()
             )
-            replies_raw = res_rep.data or []
+            has_liked_post = bool(res_lk.data)
         except Exception:
             pass
 
-        # Verifica curtidas nas respostas
-        liked_reply_ids = set()
-        if visitor and replies_raw:
-            try:
-                r_ids = [str(r["id"]) for r in replies_raw]
-                res_rlk = (
-                    await db.table(Tables.REGULATION_LIKES)
-                    .select("target_id")
-                    .eq("user_id", visitor["id"])
-                    .eq("target_type", "reply")
-                    .in_("target_id", r_ids)
-                    .execute()
-                )
-                liked_reply_ids = {str(lk["target_id"]) for lk in (res_rlk.data or [])}
-            except Exception:
-                pass
-
-        formatted_replies = [
-            _format_reply(
-                item=r,
-                user_dict=r.get("users"),
-                has_liked=str(r["id"]) in liked_reply_ids,
-            )
-            for r in replies_raw
-        ]
-
-        best_reply_obj = None
-        if post_data.get("best_reply_id"):
-            for r in formatted_replies:
-                if str(r.get("id")) == str(post_data["best_reply_id"]):
-                    best_reply_obj = r
-                    break
-
-        return _format_post(
-            item=post_data,
-            user_dict=post_data.get("users"),
-            has_liked=has_liked_post,
-            replies=formatted_replies,
-            best_reply=best_reply_obj,
+    # Busca respostas
+    replies_raw = []
+    try:
+        res_rep = (
+            await db.table(Tables.REGULATION_REPLIES)
+            .select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)")
+            .eq("post_id", post_id)
+            .neq("status", "deleted")
+            .order("is_best_answer", desc=True)
+            .order("likes_count", desc=True)
+            .order("created_at", desc=False)
+            .execute()
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Erro ao buscar post {post_id}: {e}")
-        raise HTTPException(status_code=500, detail="Erro ao carregar detalhes da publicação.")
+        replies_raw = res_rep.data or []
+    except Exception:
+        try:
+            res_rep_simple = await db.table(Tables.REGULATION_REPLIES).select("*").eq("post_id", post_id).execute()
+            replies_raw = res_rep_simple.data or []
+        except Exception:
+            pass
+
+    # Verifica curtidas nas respostas
+    liked_reply_ids = set()
+    if visitor and replies_raw:
+        try:
+            r_ids = [str(r["id"]) for r in replies_raw]
+            res_rlk = (
+                await db.table(Tables.REGULATION_LIKES)
+                .select("target_id")
+                .eq("user_id", visitor["id"])
+                .eq("target_type", "reply")
+                .in_("target_id", r_ids)
+                .execute()
+            )
+            liked_reply_ids = {str(lk["target_id"]) for lk in (res_rlk.data or [])}
+        except Exception:
+            pass
+
+    formatted_replies = [
+        _format_reply(
+            item=r,
+            user_dict=r.get("users"),
+            has_liked=str(r["id"]) in liked_reply_ids,
+        )
+        for r in replies_raw
+    ]
+
+    best_reply_obj = None
+    if post_data.get("best_reply_id"):
+        for r in formatted_replies:
+            if str(r.get("id")) == str(post_data["best_reply_id"]):
+                best_reply_obj = r
+                break
+
+    return _format_post(
+        item=post_data,
+        user_dict=post_data.get("users"),
+        has_liked=has_liked_post,
+        replies=formatted_replies,
+        best_reply=best_reply_obj,
+    )
 
 
 @router.put("/posts/{post_id}", response_model=RegulationPostResponse)
