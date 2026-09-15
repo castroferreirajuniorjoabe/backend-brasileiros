@@ -324,8 +324,55 @@ async def list_regulation_posts(
             items=formatted,
         )
     except Exception as e:
-        logger.error(f"Erro ao listar regulation posts: {e}")
-        return RegulationPostListResponse(total=0, page=page, page_size=page_size, items=[])
+        logger.warning(f"Select direto em regulation_posts falhou: {e}. Tentando fallback simples...")
+        try:
+            res_simple = await db.table(Tables.REGULATION_POSTS).select("*").eq("status", "active").order("created_at", desc=True).limit(50).execute()
+            if res_simple.data:
+                formatted = [_format_post(it) for it in res_simple.data]
+                return RegulationPostListResponse(total=len(formatted), page=page, page_size=page_size, items=formatted)
+        except Exception:
+            pass
+
+        # Fallback charity_ads
+        try:
+            res_c = await db.table(Tables.CHARITY_ADS).select("*").ilike("description", "%REGULATION_META:%").order("created_at", desc=True).limit(50).execute()
+            fallback_items = []
+            for c_item in (res_c.data or []):
+                desc = c_item.get("description") or ""
+                real_type = "question"
+                real_cat = "vistos"
+                real_desc = desc
+                images = []
+                if "REGULATION_META:" in desc and "---DESC---" in desc:
+                    parts = desc.split("---DESC---")
+                    meta_str = parts[0].replace("REGULATION_META:", "").strip()
+                    try:
+                        m_obj = json.loads(meta_str)
+                        real_type = m_obj.get("type") or "question"
+                        real_cat = m_obj.get("category") or "vistos"
+                        images = m_obj.get("images") or []
+                    except Exception:
+                        pass
+                    real_desc = parts[1].strip() if len(parts) > 1 else desc
+                
+                title = (c_item.get("title") or "").replace("[QUESTION]", "").replace("[TIP]", "").replace("[DUVIDA]", "").replace("[DICA]", "").strip()
+                p_data = {
+                    "id": c_item.get("id"),
+                    "user_id": c_item.get("user_id"),
+                    "type": real_type,
+                    "category": real_cat,
+                    "title": title,
+                    "content": real_desc,
+                    "images": images or ([c_item.get("image_url")] if c_item.get("image_url") else []),
+                    "likes_count": 0,
+                    "replies_count": 0,
+                    "is_solved": False,
+                    "created_at": c_item.get("created_at"),
+                }
+                fallback_items.append(_format_post(p_data))
+            return RegulationPostListResponse(total=len(fallback_items), page=page, page_size=page_size, items=fallback_items)
+        except Exception:
+            return RegulationPostListResponse(total=0, page=page, page_size=page_size, items=[])
 
 
 @router.get("/posts/mine", response_model=List[RegulationPostResponse])
@@ -345,8 +392,53 @@ async def list_my_regulation_posts(
         )
         return [_format_post(it, user_dict=user) for it in (res.data or [])]
     except Exception as e:
-        logger.warning(f"Erro ao buscar regulation posts do usuário: {e}")
-        return []
+        logger.warning(f"Erro ao buscar regulation posts do usuário: {e}. Tentando fallback...")
+        try:
+            res_simple = await db.table(Tables.REGULATION_POSTS).select("*").eq("user_id", user["id"]).order("created_at", desc=True).execute()
+            if res_simple.data:
+                return [_format_post(it, user_dict=user) for it in res_simple.data]
+        except Exception:
+            pass
+
+        try:
+            res_c = await db.table(Tables.CHARITY_ADS).select("*").eq("user_id", user["id"]).ilike("description", "%REGULATION_META:%").order("created_at", desc=True).execute()
+            fallback_items = []
+            for c_item in (res_c.data or []):
+                desc = c_item.get("description") or ""
+                real_type = "question"
+                real_cat = "vistos"
+                real_desc = desc
+                images = []
+                if "REGULATION_META:" in desc and "---DESC---" in desc:
+                    parts = desc.split("---DESC---")
+                    meta_str = parts[0].replace("REGULATION_META:", "").strip()
+                    try:
+                        m_obj = json.loads(meta_str)
+                        real_type = m_obj.get("type") or "question"
+                        real_cat = m_obj.get("category") or "vistos"
+                        images = m_obj.get("images") or []
+                    except Exception:
+                        pass
+                    real_desc = parts[1].strip() if len(parts) > 1 else desc
+                
+                title = (c_item.get("title") or "").replace("[QUESTION]", "").replace("[TIP]", "").replace("[DUVIDA]", "").replace("[DICA]", "").strip()
+                p_data = {
+                    "id": c_item.get("id"),
+                    "user_id": c_item.get("user_id"),
+                    "type": real_type,
+                    "category": real_cat,
+                    "title": title,
+                    "content": real_desc,
+                    "images": images or ([c_item.get("image_url")] if c_item.get("image_url") else []),
+                    "likes_count": 0,
+                    "replies_count": 0,
+                    "is_solved": False,
+                    "created_at": c_item.get("created_at"),
+                }
+                fallback_items.append(_format_post(p_data, user_dict=user))
+            return fallback_items
+        except Exception:
+            return []
 
 
 @router.get("/posts/{post_id}", response_model=RegulationPostResponse)
