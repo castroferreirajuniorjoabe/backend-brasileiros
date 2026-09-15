@@ -343,7 +343,64 @@ async def list_pending(
                 data2 = res2.data or []
             except Exception:
                 data2 = []
-            return data1 + data2
+        elif kind in ["regulation-posts", "regulation_posts"]:
+            all_raw = []
+            try:
+                res1 = await db.table(Tables.REGULATION_POSTS).select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)").eq("status", target_status).order("created_at", desc=True).execute()
+                if res1.data:
+                    all_raw.extend(res1.data)
+            except Exception:
+                try:
+                    res1_simple = await db.table(Tables.REGULATION_POSTS).select("*").eq("status", target_status).order("created_at", desc=True).execute()
+                    if res1_simple.data:
+                        all_raw.extend(res1_simple.data)
+                except Exception:
+                    pass
+
+            # Fallback em CHARITY_ADS
+            try:
+                res_c = await db.table(Tables.CHARITY_ADS).select("*").ilike("description", "%REGULATION_META:%").eq("status", target_status).order("created_at", desc=True).execute()
+                if res_c.data:
+                    existing_ids = {str(x.get("id")) for x in all_raw}
+                    for c_item in res_c.data:
+                        if str(c_item.get("id")) not in existing_ids:
+                            desc = c_item.get("description") or ""
+                            real_type = "question"
+                            real_cat = "vistos"
+                            real_desc = desc
+                            images = []
+                            if "REGULATION_META:" in desc and "---DESC---" in desc:
+                                parts = desc.split("---DESC---")
+                                meta_str = parts[0].replace("REGULATION_META:", "").strip()
+                                try:
+                                    import json
+                                    m_obj = json.loads(meta_str)
+                                    real_type = m_obj.get("type") or "question"
+                                    real_cat = m_obj.get("category") or "vistos"
+                                    images = m_obj.get("images") or []
+                                except Exception:
+                                    pass
+                                real_desc = parts[1].strip() if len(parts) > 1 else desc
+                            title = (c_item.get("title") or "").replace("[QUESTION]", "").replace("[TIP]", "").replace("[DUVIDA]", "").replace("[DICA]", "").strip()
+                            all_raw.append({
+                                "id": c_item.get("id"),
+                                "user_id": c_item.get("user_id"),
+                                "type": real_type,
+                                "category": real_cat,
+                                "title": title,
+                                "content": real_desc,
+                                "images": images or ([c_item.get("image_url")] if c_item.get("image_url") else []),
+                                "status": target_status,
+                                "created_at": c_item.get("created_at"),
+                            })
+            except Exception:
+                pass
+
+            try:
+                from app.routes.regulation import _format_post
+                return [_format_post(x, user_dict=x.get("users")) for x in all_raw]
+            except Exception:
+                return all_raw
         else:
             result = await db.table(table).select("*").eq("status", target_status).order("created_at", desc=True).execute()
         return result.data or []
@@ -408,6 +465,16 @@ async def approve_item(kind: str, item_id: str, db: AsyncClient = Depends(get_db
                     result = await db.table(Tables.GROUPS).update({"is_approved": True, "is_active": True}).eq("id", item_id).execute()
                 except Exception:
                     pass
+        elif kind in ["regulation-posts", "regulation_posts"]:
+            try:
+                result = await db.table(Tables.REGULATION_POSTS).update({"status": "approved", "rejection_reason": None}).eq("id", item_id).execute()
+                if not result.data:
+                    result = await db.table(Tables.CHARITY_ADS).update({"status": "approved"}).eq("id", item_id).execute()
+            except Exception:
+                try:
+                    result = await db.table(Tables.CHARITY_ADS).update({"status": "approved"}).eq("id", item_id).execute()
+                except Exception:
+                    result = None
         else:
             result = await db.table(table).update({"status": status_enum.APPROVED.value}).eq("id", item_id).execute()
     except Exception:
@@ -424,7 +491,12 @@ async def approve_item(kind: str, item_id: str, db: AsyncClient = Depends(get_db
     item_user_id = item_data.get("user_id") or item_data.get("created_by")
     if item_user_id:
         item_title = item_data.get("name") or item_data.get("title") or "item"
-        link = f"/anuncio/{item_id}" if kind == "ads" else f"/{kind}"
+        if kind in ["regulation-posts", "regulation_posts"]:
+            link = f"/regularizacao/{item_id}"
+        elif kind == "ads":
+            link = f"/anuncio/{item_id}"
+        else:
+            link = f"/{kind}"
         await create_notification(
             db=db,
             user_id=item_user_id,
@@ -503,6 +575,16 @@ async def reject_item(
                     result = await db.table(Tables.GROUPS).update({"is_approved": False, "is_active": False}).eq("id", item_id).execute()
                 except Exception:
                     pass
+        elif kind in ["regulation-posts", "regulation_posts"]:
+            try:
+                result = await db.table(Tables.REGULATION_POSTS).update(update).eq("id", item_id).execute()
+                if not result.data:
+                    result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
+            except Exception:
+                try:
+                    result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
+                except Exception:
+                    result = None
         else:
             result = await db.table(table).update(update).eq("id", item_id).execute()
     except Exception:
@@ -522,7 +604,7 @@ async def reject_item(
             db=db,
             user_id=item_user_id,
             title="Publicação Não Aprovada",
-            message=f"Sua publicação \"{item_title}\" precisa de ajustes.{reason_msg}",
+            message=f"Sua publicação \"{item_title}\" não foi aprovada.{reason_msg}",
             type="ad_rejected",
             link="/painel",
         )

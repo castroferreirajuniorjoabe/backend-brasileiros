@@ -72,7 +72,8 @@ class RegulationPostResponse(BaseModel):
     is_solved: bool = False
     best_reply_id: Optional[str] = None
     best_reply: Optional[RegulationReplyResponse] = None
-    status: str = "active"  # 'active', 'pending', 'hidden', 'deleted'
+    status: str = "pending"  # 'pending', 'approved', 'rejected', 'hidden', 'deleted'
+    rejection_reason: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     replies: List[RegulationReplyResponse] = []

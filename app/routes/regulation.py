@@ -102,7 +102,8 @@ def _format_post(item: dict, user_dict: dict = None, has_liked: bool = False, re
     m["is_liked_by_me"] = has_liked
     m["is_solved"] = bool(m.get("is_solved", False))
     m["best_reply_id"] = str(m["best_reply_id"]) if m.get("best_reply_id") else None
-    m["status"] = m.get("status") or "active"
+    m["status"] = m.get("status") or "pending"
+    m["rejection_reason"] = m.get("rejection_reason")
     m["created_at"] = str(m["created_at"]) if m.get("created_at") else None
     m["updated_at"] = str(m["updated_at"]) if m.get("updated_at") else None
 
@@ -167,6 +168,8 @@ async def create_regulation_post(
 
     images_clean = [img for img in (payload.images or []) if img and str(img).strip()][:3]
 
+    initial_status = "approved" if user.get("is_admin") else "pending"
+
     record = {
         "user_id": user["id"],
         "type": payload.type if payload.type in ["question", "tip"] else "question",
@@ -178,7 +181,8 @@ async def create_regulation_post(
         "replies_count": 0,
         "views_count": 0,
         "is_solved": False,
-        "status": "active",
+        "status": initial_status,
+        "rejection_reason": None,
     }
 
     # Tentativa 1: Inserção na tabela dedicada `regulation_posts`
@@ -210,6 +214,7 @@ async def create_regulation_post(
         "likes_count": 0,
         "replies_count": 0,
         "is_solved": False,
+        "status": initial_status,
     }
     encoded_desc = f"REGULATION_META:{json.dumps(meta_dict)}\n---DESC---\n{payload.content.strip()}"
 
@@ -222,7 +227,7 @@ async def create_regulation_post(
             "contact_phone": user.get("phone") or "0000000000",
             "image_url": images_clean[0] if len(images_clean) > 0 else None,
             "image_2_url": images_clean[1] if len(images_clean) > 1 else None,
-            "status": "approved",
+            "status": initial_status,
             "type": "regulation",
         },
         {
@@ -233,7 +238,7 @@ async def create_regulation_post(
             "contact_phone": user.get("phone") or "0000000000",
             "image_url": images_clean[0] if len(images_clean) > 0 else None,
             "image_2_url": images_clean[1] if len(images_clean) > 1 else None,
-            "status": "approved",
+            "status": initial_status,
         },
     ]
 
@@ -265,12 +270,12 @@ async def list_regulation_posts(
     db: AsyncClient = Depends(get_db),
     visitor: Optional[dict] = Depends(get_optional_user),
 ):
-    """Lista publicações públicas com filtros de tipo (Dúvidas/Dicas), categorias, busca e ordenação."""
+    """Lista publicações públicas aprovadas com filtros de tipo (Dúvidas/Dicas), categorias, busca e ordenação."""
     search_term = (q or search or "").strip().lower()
 
     try:
         query = db.table(Tables.REGULATION_POSTS).select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)")
-        query = query.eq("status", "active")
+        query = query.in_("status", ["approved", "active"])
 
         if type and type in ["question", "tip"]:
             query = query.eq("type", type)
@@ -332,7 +337,7 @@ async def list_regulation_posts(
     except Exception as e:
         logger.warning(f"Select direto em regulation_posts falhou: {e}. Tentando fallback simples...")
         try:
-            res_simple = await db.table(Tables.REGULATION_POSTS).select("*").eq("status", "active").order("created_at", desc=True).limit(50).execute()
+            res_simple = await db.table(Tables.REGULATION_POSTS).select("*").in_("status", ["approved", "active"]).order("created_at", desc=True).limit(50).execute()
             if res_simple.data:
                 formatted = [_format_post(it) for it in res_simple.data]
                 return RegulationPostListResponse(total=len(formatted), page=page, page_size=page_size, items=formatted)
@@ -341,7 +346,7 @@ async def list_regulation_posts(
 
         # Fallback charity_ads
         try:
-            res_c = await db.table(Tables.CHARITY_ADS).select("*").ilike("description", "%REGULATION_META:%").order("created_at", desc=True).limit(50).execute()
+            res_c = await db.table(Tables.CHARITY_ADS).select("*").ilike("description", "%REGULATION_META:%").in_("status", ["approved", "active"]).order("created_at", desc=True).limit(50).execute()
             fallback_items = []
             for c_item in (res_c.data or []):
                 desc = c_item.get("description") or ""
@@ -558,6 +563,16 @@ async def get_regulation_post_detail(
 
     if not post_data:
         raise HTTPException(status_code=404, detail="Publicação não encontrada.")
+
+    post_status = post_data.get("status") or "pending"
+    if post_status not in ["approved", "active"]:
+        is_owner = visitor and str(visitor.get("id")) == str(post_data.get("user_id"))
+        is_admin = visitor and bool(visitor.get("is_admin"))
+        if not is_owner and not is_admin:
+            raise HTTPException(
+                status_code=403,
+                detail="Esta publicação está aguardando moderação e ainda não foi aprovada.",
+            )
 
     # Verifica curtida no post
     has_liked_post = False

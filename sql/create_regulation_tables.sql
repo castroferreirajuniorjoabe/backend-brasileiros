@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS public.regulation_posts (
     replies_count INTEGER NOT NULL DEFAULT 0,
     is_solved BOOLEAN NOT NULL DEFAULT false,
     best_reply_id UUID,
-    status TEXT NOT NULL DEFAULT 'active', -- 'active', 'pending', 'hidden', 'deleted'
+    status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'approved', 'rejected', 'hidden', 'deleted'
+    rejection_reason TEXT,
     views_count INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
