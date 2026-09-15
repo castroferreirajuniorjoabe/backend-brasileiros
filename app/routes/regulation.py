@@ -357,12 +357,6 @@ async def get_regulation_post_detail(
 ):
     """Retorna o detalhe de uma publicação com suas respostas e indicação de melhor resposta."""
     try:
-        # Incrementa visualizações
-        try:
-            await db.table(Tables.REGULATION_POSTS).update({"views_count": db.raw("views_count + 1")}).eq("id", post_id).execute()
-        except Exception:
-            pass
-
         res = (
             await db.table(Tables.REGULATION_POSTS)
             .select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)")
