@@ -1087,7 +1087,7 @@ async def admin_delete_record(
 
     # 4. Fallback especial para Turismo, Pets, Empregos, Mudança e Artistas
     if not deleted:
-        if actual_table in [Tables.TOURISM_SPOTS, Tables.PET_POSTS, "tourism-spots", "pet-posts"]:
+        if actual_table in [Tables.TOURISM_SPOTS, Tables.PET_POSTS, "tourism-spots", "pet-posts", "regulation-posts", "regulation_posts"]:
             try:
                 res_c = await db.table(Tables.CHARITY_ADS).delete().eq("id", record_id).execute()
                 if res_c.data:

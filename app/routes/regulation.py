@@ -789,20 +789,39 @@ async def delete_regulation_post(
     db: AsyncClient = Depends(get_db),
 ):
     """Exclui uma publicação (autor ou admin)."""
-    res_check = await db.table(Tables.REGULATION_POSTS).select("user_id").eq("id", post_id).limit(1).execute()
-    if not res_check.data:
+    post = None
+    actual_table = Tables.REGULATION_POSTS
+
+    # 1. Tenta buscar na tabela principal
+    try:
+        res_check = await db.table(Tables.REGULATION_POSTS).select("user_id").eq("id", post_id).limit(1).execute()
+        if res_check.data:
+            post = res_check.data[0]
+    except Exception:
+        pass
+
+    # 2. Fallback: busca na tabela charity_ads
+    if not post:
+        try:
+            res_check = await db.table(Tables.CHARITY_ADS).select("user_id").eq("id", post_id).limit(1).execute()
+            if res_check.data:
+                post = res_check.data[0]
+                actual_table = Tables.CHARITY_ADS
+        except Exception:
+            pass
+
+    if not post:
         raise HTTPException(status_code=404, detail="Publicação não encontrada.")
 
-    post = res_check.data[0]
     if str(post.get("user_id")) != str(user["id"]) and not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Você não tem permissão para apagar esta publicação.")
 
     try:
-        await db.table(Tables.REGULATION_POSTS).delete().eq("id", post_id).execute()
+        await db.table(actual_table).delete().eq("id", post_id).execute()
     except Exception as e:
-        logger.error(f"Erro ao deletar post: {e}")
+        logger.error(f"Erro ao deletar post de {actual_table}: {e}")
         # Soft delete fallback
-        await db.table(Tables.REGULATION_POSTS).update({"status": "deleted"}).eq("id", post_id).execute()
+        await db.table(actual_table).update({"status": "deleted"}).eq("id", post_id).execute()
 
     return None
 
