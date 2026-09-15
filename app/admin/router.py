@@ -45,6 +45,7 @@ MODERATED = {
     "job-ads": (Tables.GROUPS, ModerationStatus),
     "jobs": (Tables.GROUPS, ModerationStatus),
     "moving-sales": (Tables.MOVING_SALES, ModerationStatus),
+    "artists": (Tables.ARTISTS, ModerationStatus),
 }
 
 # Tabelas gerenciáveis via endpoints genéricos
@@ -69,6 +70,8 @@ MANAGEABLE_TABLES = {
     "jobs": Tables.GROUPS,
     "moving_sales": Tables.MOVING_SALES,
     "moving-sales": Tables.MOVING_SALES,
+    "artists": Tables.ARTISTS,
+    "artist_events": Tables.ARTIST_EVENTS,
 }
 
 
@@ -237,6 +240,60 @@ async def list_pending(
                 return [_format_moving_sale(x) for x in all_raw]
             except Exception:
                 return all_raw
+        elif kind == "artists":
+            all_raw = []
+            # 1. Tabela dedicada artists
+            try:
+                res1 = await db.table(table).select("*").eq("status", target_status).order("created_at", desc=True).execute()
+                if res1.data:
+                    all_raw.extend(res1.data)
+            except Exception:
+                pass
+
+            # 2. Tabela charity_ads (fallback type=artist ou title contendo ARTISTA)
+            try:
+                res_c1 = await db.table(Tables.CHARITY_ADS).select("*").eq("type", "artist").eq("status", target_status).order("created_at", desc=True).execute()
+                if res_c1.data:
+                    existing_ids = {str(x.get("id")) for x in all_raw}
+                    for it in res_c1.data:
+                        if str(it.get("id")) not in existing_ids:
+                            all_raw.append(it)
+            except Exception:
+                pass
+
+            try:
+                res_c2 = await db.table(Tables.CHARITY_ADS).select("*").ilike("title", "%ARTISTA%").eq("status", target_status).order("created_at", desc=True).execute()
+                if res_c2.data:
+                    existing_ids = {str(x.get("id")) for x in all_raw}
+                    for it in res_c2.data:
+                        if str(it.get("id")) not in existing_ids:
+                            all_raw.append(it)
+            except Exception:
+                pass
+
+            # 3. Tabela groups (fallback category artist:% ou name contendo ARTISTA)
+            try:
+                q_grp = db.table(Tables.GROUPS).select("*").or_("category.ilike.artist:%,name.ilike.%ARTISTA%")
+                if target_status == "pending":
+                    q_grp = q_grp.or_("is_approved.eq.false,is_approved.is.null")
+                elif target_status == "approved":
+                    q_grp = q_grp.eq("is_approved", True).eq("is_active", True)
+                elif target_status == "rejected":
+                    q_grp = q_grp.eq("is_approved", False).eq("is_active", False)
+                res_g = await q_grp.order("created_at", desc=True).execute()
+                if res_g.data:
+                    existing_ids = {str(x.get("id")) for x in all_raw}
+                    for it in res_g.data:
+                        if str(it.get("id")) not in existing_ids:
+                            all_raw.append(it)
+            except Exception:
+                pass
+
+            try:
+                from app.routes.artists import _format_artist
+                return [_format_artist(x) for x in all_raw]
+            except Exception:
+                return all_raw
         elif kind == "pet-posts":
             # Busca na tabela PET_POSTS ou registros com type=pet
             try:
@@ -330,6 +387,21 @@ async def approve_item(kind: str, item_id: str, db: AsyncClient = Depends(get_db
                     result = await db.table(Tables.GROUPS).update({"is_approved": True, "is_active": True}).eq("id", item_id).execute()
                 except Exception:
                     pass
+        elif kind == "artists":
+            try:
+                result = await db.table(Tables.ARTISTS).update({"status": "approved", "rejection_reason": None}).eq("id", item_id).execute()
+                if not result.data:
+                    result = await db.table(Tables.CHARITY_ADS).update({"status": "approved"}).eq("id", item_id).execute()
+            except Exception:
+                try:
+                    result = await db.table(Tables.CHARITY_ADS).update({"status": "approved"}).eq("id", item_id).execute()
+                except Exception:
+                    result = None
+            if not result or not result.data:
+                try:
+                    result = await db.table(Tables.GROUPS).update({"is_approved": True, "is_active": True}).eq("id", item_id).execute()
+                except Exception:
+                    pass
         else:
             result = await db.table(table).update({"status": status_enum.APPROVED.value}).eq("id", item_id).execute()
     except Exception:
@@ -398,6 +470,21 @@ async def reject_item(
         elif kind == "moving-sales":
             try:
                 result = await db.table(Tables.MOVING_SALES).update(update).eq("id", item_id).execute()
+                if not result.data:
+                    result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
+            except Exception:
+                try:
+                    result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
+                except Exception:
+                    result = None
+            if not result or not result.data:
+                try:
+                    result = await db.table(Tables.GROUPS).update({"is_approved": False, "is_active": False}).eq("id", item_id).execute()
+                except Exception:
+                    pass
+        elif kind == "artists":
+            try:
+                result = await db.table(Tables.ARTISTS).update(update).eq("id", item_id).execute()
                 if not result.data:
                     result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
             except Exception:
@@ -741,6 +828,31 @@ async def admin_update_record(
                 except Exception:
                     pass
 
+        elif table in ["artists"]:
+            try:
+                charity_payload = dict(payload)
+                if "city" in charity_payload and "location" not in charity_payload:
+                    charity_payload["location"] = charity_payload.pop("city")
+                if "artistic_name" in charity_payload and "title" not in charity_payload:
+                    charity_payload["title"] = f"[ARTISTA] {charity_payload.pop('artistic_name')}"
+                if "bio" in charity_payload and "description" not in charity_payload:
+                    charity_payload["description"] = charity_payload.pop("bio")
+                if "phone" in charity_payload and "contact_phone" not in charity_payload:
+                    charity_payload["contact_phone"] = charity_payload.pop("phone")
+                res_c = await db.table(Tables.CHARITY_ADS).update(charity_payload).eq("id", record_id).execute()
+                if res_c.data:
+                    result = res_c
+            except Exception:
+                pass
+
+            if not result or not result.data:
+                try:
+                    res_g = await db.table(Tables.GROUPS).update(payload).eq("id", record_id).execute()
+                    if res_g.data:
+                        result = res_g
+                except Exception:
+                    pass
+
     if not result or not result.data:
         raise HTTPException(status_code=404, detail="Registro não encontrado.")
     return result.data[0]
@@ -770,6 +882,8 @@ async def admin_delete_record(
         "arrival_guide": Tables.GROUPS,
         "moving_sales": Tables.MOVING_SALES,
         "moving-sales": Tables.MOVING_SALES,
+        "artists": Tables.ARTISTS,
+        "artist_events": Tables.ARTIST_EVENTS,
     }
     actual_table = table_map.get(table) or MANAGEABLE_TABLES.get(table) or table
 
@@ -831,13 +945,18 @@ async def admin_delete_record(
     # 3. Tenta apagar da tabela alvo principal
     deleted = False
     try:
+        if actual_table == Tables.ARTISTS:
+            try:
+                await db.table(Tables.ARTIST_EVENTS).delete().eq("artist_id", record_id).execute()
+            except Exception:
+                pass
         res = await db.table(actual_table).delete().eq("id", record_id).execute()
         if res.data:
             deleted = True
     except Exception:
         pass
 
-    # 4. Fallback especial para Turismo, Pets, Empregos e Mudança
+    # 4. Fallback especial para Turismo, Pets, Empregos, Mudança e Artistas
     if not deleted:
         if actual_table in [Tables.TOURISM_SPOTS, Tables.PET_POSTS, "tourism-spots", "pet-posts"]:
             try:
@@ -847,6 +966,20 @@ async def admin_delete_record(
             except Exception:
                 pass
         elif actual_table in [Tables.MOVING_SALES, "moving_sales", "moving-sales"]:
+            try:
+                res_c = await db.table(Tables.CHARITY_ADS).delete().eq("id", record_id).execute()
+                if res_c.data:
+                    deleted = True
+            except Exception:
+                pass
+            if not deleted:
+                try:
+                    res_g = await db.table(Tables.GROUPS).delete().eq("id", record_id).execute()
+                    if res_g.data:
+                        deleted = True
+                except Exception:
+                    pass
+        elif actual_table in [Tables.ARTISTS, "artists"]:
             try:
                 res_c = await db.table(Tables.CHARITY_ADS).delete().eq("id", record_id).execute()
                 if res_c.data:

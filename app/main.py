@@ -13,6 +13,7 @@ from app.config import settings
 from app.routes import (
     ads,
     arrival_guide,
+    artists,
     associations,
     auth,
     charity_ads,
@@ -126,6 +127,7 @@ app.include_router(pet_posts.router)
 app.include_router(item_comments.router)
 app.include_router(job_ads.router)
 app.include_router(moving_sales.router)
+app.include_router(artists.router)
 app.include_router(news_carousel.router)
 app.include_router(arrival_guide.router)
 app.include_router(gift_codes.router)

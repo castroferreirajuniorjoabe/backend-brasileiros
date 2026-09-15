@@ -22,6 +22,8 @@ class Tables:
     ADMINS = "admins"
     NOTIFICATIONS = "notifications"
     MOVING_SALES = "moving_sales"
+    ARTISTS = "artists"
+    ARTIST_EVENTS = "artist_events"
 
 
 class AdType(str, Enum):
@@ -88,4 +90,5 @@ CHARITY_ADS_PER_WEEK = 1
 HIGHLIGHT_DURATION_DAYS = 7
 RANKING_TOP_REWARDED = 3
 MAX_MOVING_SALES_PER_USER = 5
+MAX_ARTISTS_PER_USER = 3
 
