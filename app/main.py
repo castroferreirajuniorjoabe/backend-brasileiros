@@ -5,11 +5,12 @@ from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.admin.router import router as admin_router
 from app.config import settings
+from app.utils import image as image_utils
 from app.routes import (
     ads,
     arrival_guide,
@@ -111,6 +112,13 @@ async def root():
 @app.api_route("/health", methods=["GET", "HEAD"], tags=["Sistema"])
 async def health_check():
     return {"status": "ok", "app": settings.APP_NAME}
+
+
+@app.post("/upload", tags=["Upload"])
+async def upload_file_generic(file: UploadFile = File(...)):
+    """Upload genérico de imagens para o Supabase Storage."""
+    url = await image_utils.upload_image(file, folder="community")
+    return {"url": url, "filename": file.filename}
 
 
 # Rotas públicas + autenticadas
