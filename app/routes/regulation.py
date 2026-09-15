@@ -261,6 +261,7 @@ async def create_regulation_post(
 @router.get("/posts", response_model=RegulationPostListResponse)
 async def list_regulation_posts(
     type: Optional[str] = Query(None, description="'question' ou 'tip'"),
+    post_type: Optional[str] = Query(None, description="'duvida' ou 'dica' ou 'question' ou 'tip'"),
     category: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
@@ -273,12 +274,20 @@ async def list_regulation_posts(
     """Lista publicações públicas aprovadas com filtros de tipo (Dúvidas/Dicas), categorias, busca e ordenação."""
     search_term = (q or search or "").strip().lower()
 
+    # Normaliza o tipo (question/duvida -> question, tip/dica -> tip)
+    raw_type = (type or post_type or "").strip().lower()
+    normalized_type = None
+    if raw_type in ["question", "duvida", "duvidas"]:
+        normalized_type = "question"
+    elif raw_type in ["tip", "dica", "dicas"]:
+        normalized_type = "tip"
+
     try:
         query = db.table(Tables.REGULATION_POSTS).select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)")
         query = query.in_("status", ["approved", "active"])
 
-        if type and type in ["question", "tip"]:
-            query = query.eq("type", type)
+        if normalized_type:
+            query = query.eq("type", normalized_type)
 
         if category and category.lower() != "todas" and category.lower() != "all":
             query = query.eq("category", category)
