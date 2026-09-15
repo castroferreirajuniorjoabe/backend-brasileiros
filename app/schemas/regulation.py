@@ -36,7 +36,8 @@ class RegulationReplyResponse(BaseModel):
 
 
 class RegulationPostBase(BaseModel):
-    type: str = Field(default="question", description="'question' ou 'tip'")
+    type: Optional[str] = Field(default="question", description="'question' ou 'tip'")
+    post_type: Optional[str] = None
     category: str = Field(default="vistos", description="Categoria específica")
     title: str = Field(min_length=3, max_length=200)
     content: str = Field(min_length=10, max_length=10000)

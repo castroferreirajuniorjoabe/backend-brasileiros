@@ -176,11 +176,13 @@ async def create_regulation_post(
     }
 
     # Tentativa 1: Inserção na tabela dedicada `regulation_posts`
+    last_error = None
     try:
         res = await db.table(Tables.REGULATION_POSTS).insert(record).execute()
         if res.data:
             return _format_post(res.data[0], user_dict=user)
     except Exception as e1:
+        last_error = e1
         logger.warning(f"Insert em regulation_posts falhou: {e1}")
 
     # Tentativa 2 (Fallback com images em JSON string):
@@ -191,11 +193,57 @@ async def create_regulation_post(
         if res.data:
             return _format_post(res.data[0], user_dict=user)
     except Exception as e2:
-        logger.error(f"Fallback insert em regulation_posts falhou: {e2}")
+        last_error = e2
+        logger.warning(f"Fallback insert em regulation_posts falhou: {e2}")
 
+    # Tentativa 3 (Fallback na tabela charity_ads com tag REGULATION):
+    meta_dict = {
+        "type": record["type"],
+        "category": record["category"],
+        "images": images_clean,
+        "likes_count": 0,
+        "replies_count": 0,
+        "is_solved": False,
+    }
+    encoded_desc = f"REGULATION_META:{json.dumps(meta_dict)}\n---DESC---\n{payload.content.strip()}"
+
+    charity_attempts = [
+        {
+            "user_id": user["id"],
+            "title": f"[{record['type'].upper()}] {payload.title.strip()}",
+            "description": encoded_desc,
+            "location": "França",
+            "contact_phone": user.get("phone") or "0000000000",
+            "image_url": images_clean[0] if len(images_clean) > 0 else None,
+            "image_2_url": images_clean[1] if len(images_clean) > 1 else None,
+            "status": "approved",
+            "type": "regulation",
+        },
+        {
+            "user_id": user["id"],
+            "title": f"[{record['type'].upper()}] {payload.title.strip()}",
+            "description": encoded_desc,
+            "location": "França",
+            "contact_phone": user.get("phone") or "0000000000",
+            "image_url": images_clean[0] if len(images_clean) > 0 else None,
+            "image_2_url": images_clean[1] if len(images_clean) > 1 else None,
+            "status": "approved",
+        },
+    ]
+
+    for c_att in charity_attempts:
+        try:
+            res_c = await db.table(Tables.CHARITY_ADS).insert(c_att).execute()
+            if res_c.data:
+                return _format_post(res_c.data[0], user_dict=user)
+        except Exception as e_c:
+            last_error = e_c
+            logger.debug(f"Tentativa insert charity_ads fallback falhou: {e_c}")
+
+    logger.error(f"Todas as tentativas de salvar regulation_post falharam: {last_error}")
     raise HTTPException(
         status_code=500,
-        detail="Erro ao salvar publicação de regularização. Verifique se as tabelas foram criadas no banco.",
+        detail=f"Erro ao salvar publicação: {str(last_error) if last_error else 'Tabela não encontrada'}. Execute o script SQL no Supabase para criar 'regulation_posts'.",
     )
 
 
