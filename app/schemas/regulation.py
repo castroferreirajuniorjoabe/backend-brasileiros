@@ -68,6 +68,7 @@ class RegulationPostResponse(BaseModel):
     replies_count: int = 0
     views_count: int = 0
     has_liked: bool = False
+    is_liked_by_me: bool = False
     is_solved: bool = False
     best_reply_id: Optional[str] = None
     best_reply: Optional[RegulationReplyResponse] = None
@@ -86,15 +87,33 @@ class RegulationPostListResponse(BaseModel):
 
 class RegulationLikeToggleResponse(BaseModel):
     has_liked: bool
+    liked: Optional[bool] = None
     likes_count: int
     message: str
 
+    def __init__(self, **data):
+        if "liked" not in data and "has_liked" in data:
+            data["liked"] = data["has_liked"]
+        super().__init__(**data)
+
 
 class RegulationReportCreate(BaseModel):
-    target_type: str = Field(..., description="'post' ou 'reply'")
-    target_id: str
-    reason: str = Field(..., min_length=3, max_length=100)
+    target_type: Optional[str] = None
+    target_id: Optional[str] = None
+    post_id: Optional[str] = None
+    reply_id: Optional[str] = None
+    reason: str = Field(..., min_length=2, max_length=100)
     details: Optional[str] = Field(None, max_length=1000)
+
+    def __init__(self, **data):
+        if not data.get("target_type"):
+            if data.get("reply_id"):
+                data["target_type"] = "reply"
+                data["target_id"] = data["reply_id"]
+            else:
+                data["target_type"] = "post"
+                data["target_id"] = data.get("post_id") or ""
+        super().__init__(**data)
 
 
 class RegulationReportResponse(BaseModel):
