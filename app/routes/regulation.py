@@ -40,8 +40,9 @@ BANNED_WORDS = [
     "documento falso", "passaporte falso", "comprar visto", "hack",
 ]
 
-# Fallback in-memory para curtidas quando tabela específica ainda estiver em migração
+# Fallback in-memory para curtidas e respostas quando tabela específica ainda estiver em migração
 _FALLBACK_LIKES: set = set()
+_FALLBACK_REPLIES: list = []
 
 
 def _check_banned_words(text: str):
@@ -600,7 +601,7 @@ async def get_regulation_post_detail(
         except Exception:
             pass
 
-    # Fallback para respostas em item_comments se regulation_replies estiver vazia
+    # Fallback para respostas em item_comments ou GROUPS se regulation_replies estiver vazia
     if not replies_raw:
         try:
             res_ic = (
@@ -625,6 +626,37 @@ async def get_regulation_post_detail(
                 })
         except Exception:
             pass
+
+    if not replies_raw:
+        try:
+            chat_cat = f"chat:regulation_post:{post_id}"
+            res_g = (
+                await db.table(Tables.GROUPS)
+                .select("*, users:created_by(id, name, avatar_url, city, is_verified, is_admin)")
+                .eq("category", chat_cat)
+                .order("created_at", desc=False)
+                .execute()
+            )
+            for g in (res_g.data or []):
+                replies_raw.append({
+                    "id": g.get("id"),
+                    "post_id": post_id,
+                    "user_id": g.get("created_by"),
+                    "content": g.get("description") or "",
+                    "likes_count": 0,
+                    "is_best_answer": False,
+                    "status": "active",
+                    "created_at": g.get("created_at"),
+                    "users": g.get("users"),
+                })
+        except Exception:
+            pass
+
+    # Inclui respostas da memória
+    existing_ids = {str(r.get("id")) for r in replies_raw}
+    for mem_r in _FALLBACK_REPLIES:
+        if str(mem_r.get("post_id")) == str(post_id) and str(mem_r.get("id")) not in existing_ids:
+            replies_raw.append(mem_r)
 
     # Verifica curtidas nas respostas
     liked_reply_ids = set()
@@ -965,8 +997,8 @@ async def create_regulation_reply(
         res_ic = await db.table(Tables.ITEM_COMMENTS).insert(ic_record).execute()
         if res_ic.data:
             ic_created = res_ic.data[0]
-            return _format_reply({
-                "id": ic_created["id"],
+            rep_obj = {
+                "id": str(ic_created["id"]),
                 "post_id": post_id,
                 "user_id": user["id"],
                 "content": payload.content.strip(),
@@ -974,13 +1006,47 @@ async def create_regulation_reply(
                 "is_best_answer": False,
                 "status": "active",
                 "created_at": ic_created.get("created_at") or utcnow().isoformat(),
-            }, user_dict=user)
+            }
+            _FALLBACK_REPLIES.append(rep_obj)
+            return _format_reply(rep_obj, user_dict=user)
     except Exception as e_ic:
         logger.warning(f"Erro ao inserir resposta em item_comments: {e_ic}")
 
-    # Retorno limpo garantido
-    return _format_reply({
-        "id": f"rep-{utcnow().timestamp()}",
+    # Tentativa 3: Fallback em GROUPS
+    try:
+        chat_cat = f"chat:regulation_post:{post_id}"
+        group_msg_record = {
+            "name": user.get("name") or "Brasileiro(a)",
+            "description": payload.content.strip(),
+            "category": chat_cat,
+            "city": "França",
+            "platform": "regulation",
+            "invite_link": f"chat://regulation_post/{post_id}",
+            "is_approved": True,
+            "is_active": True,
+            "created_by": user["id"],
+        }
+        res_g = await db.table(Tables.GROUPS).insert(group_msg_record).execute()
+        if res_g.data:
+            g_created = res_g.data[0]
+            rep_obj = {
+                "id": str(g_created["id"]),
+                "post_id": post_id,
+                "user_id": user["id"],
+                "content": payload.content.strip(),
+                "likes_count": 0,
+                "is_best_answer": False,
+                "status": "active",
+                "created_at": g_created.get("created_at") or utcnow().isoformat(),
+            }
+            _FALLBACK_REPLIES.append(rep_obj)
+            return _format_reply(rep_obj, user_dict=user)
+    except Exception as e_g:
+        logger.warning(f"Erro ao inserir resposta em groups fallback: {e_g}")
+
+    # Tentativa 4: Retorno garantido em memória
+    rep_obj = {
+        "id": f"rep-{int(utcnow().timestamp() * 1000)}",
         "post_id": post_id,
         "user_id": user["id"],
         "content": payload.content.strip(),
@@ -988,7 +1054,9 @@ async def create_regulation_reply(
         "is_best_answer": False,
         "status": "active",
         "created_at": utcnow().isoformat(),
-    }, user_dict=user)
+    }
+    _FALLBACK_REPLIES.append(rep_obj)
+    return _format_reply(rep_obj, user_dict=user)
 
 
 @router.get("/posts/{post_id}/replies", response_model=List[RegulationReplyResponse])
@@ -1044,6 +1112,37 @@ async def list_regulation_replies(
                 })
         except Exception:
             pass
+
+    if not raw:
+        try:
+            chat_cat = f"chat:regulation_post:{post_id}"
+            res_g = (
+                await db.table(Tables.GROUPS)
+                .select("*, users:created_by(id, name, avatar_url, city, is_verified, is_admin)")
+                .eq("category", chat_cat)
+                .order("created_at", desc=False)
+                .execute()
+            )
+            for g in (res_g.data or []):
+                raw.append({
+                    "id": g.get("id"),
+                    "post_id": post_id,
+                    "user_id": g.get("created_by"),
+                    "content": g.get("description") or "",
+                    "likes_count": 0,
+                    "is_best_answer": False,
+                    "status": "active",
+                    "created_at": g.get("created_at"),
+                    "users": g.get("users"),
+                })
+        except Exception:
+            pass
+
+    # Inclui respostas em memória
+    existing_ids = {str(r.get("id")) for r in raw}
+    for mem_r in _FALLBACK_REPLIES:
+        if str(mem_r.get("post_id")) == str(post_id) and str(mem_r.get("id")) not in existing_ids:
+            raw.append(mem_r)
 
     liked_ids = set()
     if visitor and raw:
