@@ -141,24 +141,7 @@ def _format_event(item: dict) -> dict:
 
 @router.post("", response_model=ArtistResponse, status_code=201)
 async def create_artist_profile(
-    artistic_name: str = Form(..., min_length=2, max_length=150),
-    area: str = Form("Música"),
-    bio: str = Form(..., min_length=10, max_length=5000),
-    city: str = Form(...),
-    instagram: Optional[str] = Form(None),
-    facebook: Optional[str] = Form(None),
-    youtube: Optional[str] = Form(None),
-    tiktok: Optional[str] = Form(None),
-    website: Optional[str] = Form(None),
-    phone: str = Form(...),
-    email: str = Form(...),
-    whatsapp: Optional[str] = Form(None),
-    profile_photo: Optional[UploadFile] = File(None),
-    gallery_1: Optional[UploadFile] = File(None),
-    gallery_2: Optional[UploadFile] = File(None),
-    gallery_3: Optional[UploadFile] = File(None),
-    gallery_4: Optional[UploadFile] = File(None),
-    gallery_5: Optional[UploadFile] = File(None),
+    payload: ArtistCreate,
     user: dict = Depends(get_current_user),
     db: AsyncClient = Depends(get_db),
 ):
@@ -199,28 +182,11 @@ async def create_artist_profile(
     except Exception:
         pass
 
-    # 2. Upload de Foto Principal
-    profile_img_url = None
-    if profile_photo and profile_photo.filename and len(str(profile_photo.filename).strip()) > 0:
-        try:
-            profile_img_url = await image_utils.upload_image(profile_photo, folder="artists_profile")
-        except Exception as e:
-            logger.warning(f"Erro ao fazer upload da foto de perfil: {e}")
-
-    # 3. Upload de até 5 imagens de galeria
-    uploaded_gallery = []
-    gallery_files = [gallery_1, gallery_2, gallery_3, gallery_4, gallery_5]
-    for gf in gallery_files:
-        if gf and gf.filename and len(str(gf.filename).strip()) > 0:
-            try:
-                g_url = await image_utils.upload_image(gf, folder="artists_gallery")
-                if g_url:
-                    uploaded_gallery.append(g_url)
-            except Exception as e:
-                logger.warning(f"Erro ao fazer upload da imagem de galeria: {e}")
-
-    if not profile_img_url and uploaded_gallery:
-        profile_img_url = uploaded_gallery[0]
+    # 2. Processamento de Imagens
+    profile_img_url = payload.profile_image or payload.photo_url
+    gallery_list = payload.gallery_images if payload.gallery_images else (payload.gallery or [])
+    if not profile_img_url and gallery_list:
+        profile_img_url = gallery_list[0]
 
     status_val = (
         ModerationStatus.APPROVED.value
@@ -228,13 +194,13 @@ async def create_artist_profile(
         else ModerationStatus.PENDING.value
     )
 
-    clean_area = area.strip() if area else "Música"
-    clean_name = artistic_name.strip()
-    clean_bio = bio.strip()
-    clean_city = city.strip() if city else "França"
-    clean_phone = phone.strip()
-    clean_email = email.strip()
-    clean_whatsapp = whatsapp.strip() if whatsapp and whatsapp.strip() else clean_phone
+    clean_area = (payload.artistic_area or payload.area or "Música").strip()
+    clean_name = (payload.artistic_name or payload.name or "Artista Brasileiro").strip()
+    clean_bio = payload.bio.strip()
+    clean_city = (payload.city or "Paris").strip()
+    clean_phone = (payload.phone or user.get("phone") or "").strip()
+    clean_email = (payload.email or user.get("email") or "").strip()
+    clean_whatsapp = (payload.whatsapp or clean_phone or "").strip()
 
     # Tentativa 1: Inserção na tabela dedicada `artists`
     record_main = {
@@ -243,13 +209,16 @@ async def create_artist_profile(
         "area": clean_area,
         "bio": clean_bio,
         "city": clean_city,
+        "address_display": payload.address_display,
         "profile_image": profile_img_url,
-        "gallery_images": uploaded_gallery,
-        "instagram": instagram.strip() if instagram else None,
-        "facebook": facebook.strip() if facebook else None,
-        "youtube": youtube.strip() if youtube else None,
-        "tiktok": tiktok.strip() if tiktok else None,
-        "website": website.strip() if website else None,
+        "photo_url": profile_img_url,
+        "gallery_images": gallery_list,
+        "gallery": gallery_list,
+        "instagram": payload.instagram.strip() if payload.instagram else None,
+        "facebook": payload.facebook.strip() if payload.facebook else None,
+        "youtube": payload.youtube.strip() if payload.youtube else None,
+        "tiktok": payload.tiktok.strip() if payload.tiktok else None,
+        "website": payload.website.strip() if payload.website else None,
         "phone": clean_phone,
         "email": clean_email,
         "whatsapp": clean_whatsapp,
@@ -265,9 +234,12 @@ async def create_artist_profile(
     except Exception as e1:
         logger.debug(f"Tentativa 1 insert em artists falhou: {e1}")
         try:
-            record_str = dict(record_main)
-            record_str["gallery_images"] = json.dumps(uploaded_gallery)
-            res = await db.table(Tables.ARTISTS).insert(record_str).execute()
+            record_clean = {k: v for k, v in record_main.items() if k in [
+                "user_id", "artistic_name", "artistic_area", "bio", "city", "address_display",
+                "instagram", "facebook", "youtube", "tiktok", "website", "phone", "email",
+                "whatsapp", "photo_url", "gallery", "status"
+            ]}
+            res = await db.table(Tables.ARTISTS).insert(record_clean).execute()
             if res.data:
                 return _format_artist(res.data[0])
         except Exception:
@@ -276,15 +248,15 @@ async def create_artist_profile(
     # Tentativa 2 (Fallback resiliente): Inserção na tabela `charity_ads`
     meta_dict = {
         "area": clean_area,
-        "instagram": instagram.strip() if instagram else None,
-        "facebook": facebook.strip() if facebook else None,
-        "youtube": youtube.strip() if youtube else None,
-        "tiktok": tiktok.strip() if tiktok else None,
-        "website": website.strip() if website else None,
+        "instagram": payload.instagram.strip() if payload.instagram else None,
+        "facebook": payload.facebook.strip() if payload.facebook else None,
+        "youtube": payload.youtube.strip() if payload.youtube else None,
+        "tiktok": payload.tiktok.strip() if payload.tiktok else None,
+        "website": payload.website.strip() if payload.website else None,
         "phone": clean_phone,
         "email": clean_email,
         "whatsapp": clean_whatsapp,
-        "gallery_images": uploaded_gallery,
+        "gallery_images": gallery_list,
     }
     encoded_desc = f"ARTIST_META:{json.dumps(meta_dict)}\n---BIO---\n{clean_bio}"
 
@@ -296,7 +268,7 @@ async def create_artist_profile(
             "location": clean_city,
             "contact_phone": clean_phone,
             "image_url": profile_img_url,
-            "image_2_url": uploaded_gallery[0] if len(uploaded_gallery) > 0 else None,
+            "image_2_url": gallery_list[0] if len(gallery_list) > 0 else None,
             "status": status_val,
             "type": "artist",
         },
