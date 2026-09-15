@@ -471,7 +471,9 @@ async def get_regulation_post_detail(
     # Fallback na tabela charity_ads se salvo via fallback
     if not post_data:
         try:
-            res_c = await db.table(Tables.CHARITY_ADS).select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)").eq("id", post_id).limit(1).execute()
+            res_c = await db.table(Tables.CHARITY_ADS).select("*").eq("id", post_id).limit(1).execute()
+            if not res_c.data:
+                res_c = await db.table(Tables.CHARITY_ADS).select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)").eq("id", post_id).limit(1).execute()
             if res_c.data:
                 c_item = res_c.data[0]
                 desc = c_item.get("description") or ""
@@ -491,7 +493,7 @@ async def get_regulation_post_detail(
                         pass
                     real_desc = parts[1].strip() if len(parts) > 1 else desc
                 
-                title = (c_item.get("title") or "").replace("[QUESTION]", "").replace("[TIP]", "").strip()
+                title = (c_item.get("title") or "").replace("[QUESTION]", "").replace("[TIP]", "").replace("[DUVIDA]", "").replace("[DICA]", "").strip()
                 post_data = {
                     "id": c_item.get("id"),
                     "user_id": c_item.get("user_id"),
@@ -508,6 +510,45 @@ async def get_regulation_post_detail(
                 }
         except Exception as e_cf:
             logger.warning(f"Fallback charity_ads lookup falhou: {e_cf}")
+
+    # Fallback na tabela groups se salvo via groups fallback
+    if not post_data:
+        try:
+            res_g = await db.table(Tables.GROUPS).select("*").eq("id", post_id).limit(1).execute()
+            if res_g.data:
+                g_item = res_g.data[0]
+                desc = g_item.get("description") or ""
+                real_type = "question"
+                real_cat = "vistos"
+                real_desc = desc
+                images = []
+                if "REGULATION_META:" in desc and "---DESC---" in desc:
+                    parts = desc.split("---DESC---")
+                    meta_str = parts[0].replace("REGULATION_META:", "").strip()
+                    try:
+                        m_obj = json.loads(meta_str)
+                        real_type = m_obj.get("type") or "question"
+                        real_cat = m_obj.get("category") or "vistos"
+                        images = m_obj.get("images") or []
+                    except Exception:
+                        pass
+                    real_desc = parts[1].strip() if len(parts) > 1 else desc
+                title = (g_item.get("name") or "").replace("[QUESTION]", "").replace("[TIP]", "").replace("[DUVIDA]", "").replace("[DICA]", "").strip()
+                post_data = {
+                    "id": g_item.get("id"),
+                    "user_id": g_item.get("user_id") or "anonymous",
+                    "type": real_type,
+                    "category": real_cat,
+                    "title": title,
+                    "content": real_desc,
+                    "images": images,
+                    "likes_count": 0,
+                    "replies_count": 0,
+                    "is_solved": False,
+                    "created_at": g_item.get("created_at"),
+                }
+        except Exception:
+            pass
 
     if not post_data:
         raise HTTPException(status_code=404, detail="Publicação não encontrada.")
