@@ -579,13 +579,8 @@ async def reject_item(
         elif kind in ["regulation-posts", "regulation_posts"]:
             try:
                 result = await db.table(Tables.REGULATION_POSTS).update(update).eq("id", item_id).execute()
-                if not result.data:
-                    result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
             except Exception:
-                try:
-                    result = await db.table(Tables.CHARITY_ADS).update(update).eq("id", item_id).execute()
-                except Exception:
-                    result = None
+                result = None
         else:
             result = await db.table(table).update(update).eq("id", item_id).execute()
     except Exception:
@@ -943,7 +938,6 @@ async def admin_update_record(
                     pass
 
         elif table in ["regulation_posts", "regulation-posts"]:
-            # Tenta atualizar na tabela regulation_posts se payload tiver description ao invés de content
             try:
                 reg_payload = dict(payload)
                 if "content" not in reg_payload and "description" in reg_payload:
@@ -953,30 +947,6 @@ async def admin_update_record(
                     result = res_reg
             except Exception:
                 pass
-
-            if not result or not result.data:
-                try:
-                    charity_payload = dict(payload)
-                    if "content" in charity_payload and "description" not in charity_payload:
-                        charity_payload["description"] = charity_payload.pop("content")
-                    res_c = await db.table(Tables.CHARITY_ADS).update(charity_payload).eq("id", record_id).execute()
-                    if res_c.data:
-                        result = res_c
-                except Exception:
-                    pass
-
-            if not result or not result.data:
-                try:
-                    grp_payload = dict(payload)
-                    if "description" not in grp_payload and "content" in grp_payload:
-                        grp_payload["description"] = grp_payload.get("content")
-                    if "name" not in grp_payload and "title" in grp_payload:
-                        grp_payload["name"] = grp_payload.get("title")
-                    res_g = await db.table(Tables.GROUPS).update(grp_payload).eq("id", record_id).execute()
-                    if res_g.data:
-                        result = res_g
-                except Exception:
-                    pass
 
     if not result or not result.data:
         raise HTTPException(status_code=404, detail="Registro não encontrado.")
@@ -1087,7 +1057,7 @@ async def admin_delete_record(
 
     # 4. Fallback especial para Turismo, Pets, Empregos, Mudança e Artistas
     if not deleted:
-        if actual_table in [Tables.TOURISM_SPOTS, Tables.PET_POSTS, "tourism-spots", "pet-posts", "regulation-posts", "regulation_posts"]:
+        if actual_table in [Tables.TOURISM_SPOTS, Tables.PET_POSTS, "tourism-spots", "pet-posts"]:
             try:
                 res_c = await db.table(Tables.CHARITY_ADS).delete().eq("id", record_id).execute()
                 if res_c.data:

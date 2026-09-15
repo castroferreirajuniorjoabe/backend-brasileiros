@@ -41,8 +41,7 @@ BANNED_WORDS = [
 ]
 
 # Fallback in-memory para curtidas e respostas quando tabela específica ainda estiver em migração
-_FALLBACK_LIKES: set = set()
-_FALLBACK_REPLIES: list = []
+
 
 
 def _check_banned_words(text: str):
@@ -185,77 +184,19 @@ async def create_regulation_post(
         "rejection_reason": None,
     }
 
-    # Tentativa 1: Inserção na tabela dedicada `regulation_posts`
-    last_error = None
     try:
         res = await db.table(Tables.REGULATION_POSTS).insert(record).execute()
         if res.data:
             return _format_post(res.data[0], user_dict=user)
-    except Exception as e1:
-        last_error = e1
-        logger.warning(f"Insert em regulation_posts falhou: {e1}")
-
-    # Tentativa 2 (Fallback com images em JSON string):
-    try:
-        record_fallback = dict(record)
-        record_fallback["images"] = json.dumps(images_clean)
-        res = await db.table(Tables.REGULATION_POSTS).insert(record_fallback).execute()
-        if res.data:
-            return _format_post(res.data[0], user_dict=user)
-    except Exception as e2:
-        last_error = e2
-        logger.warning(f"Fallback insert em regulation_posts falhou: {e2}")
-
-    # Tentativa 3 (Fallback na tabela charity_ads com tag REGULATION):
-    meta_dict = {
-        "type": record["type"],
-        "category": record["category"],
-        "images": images_clean,
-        "likes_count": 0,
-        "replies_count": 0,
-        "is_solved": False,
-        "status": initial_status,
-    }
-    encoded_desc = f"REGULATION_META:{json.dumps(meta_dict)}\n---DESC---\n{payload.content.strip()}"
-
-    charity_attempts = [
-        {
-            "user_id": user["id"],
-            "title": f"[{record['type'].upper()}] {payload.title.strip()}",
-            "description": encoded_desc,
-            "location": "França",
-            "contact_phone": user.get("phone") or "0000000000",
-            "image_url": images_clean[0] if len(images_clean) > 0 else None,
-            "image_2_url": images_clean[1] if len(images_clean) > 1 else None,
-            "status": initial_status,
-            "type": "regulation",
-        },
-        {
-            "user_id": user["id"],
-            "title": f"[{record['type'].upper()}] {payload.title.strip()}",
-            "description": encoded_desc,
-            "location": "França",
-            "contact_phone": user.get("phone") or "0000000000",
-            "image_url": images_clean[0] if len(images_clean) > 0 else None,
-            "image_2_url": images_clean[1] if len(images_clean) > 1 else None,
-            "status": initial_status,
-        },
-    ]
-
-    for c_att in charity_attempts:
-        try:
-            res_c = await db.table(Tables.CHARITY_ADS).insert(c_att).execute()
-            if res_c.data:
-                return _format_post(res_c.data[0], user_dict=user)
-        except Exception as e_c:
-            last_error = e_c
-            logger.debug(f"Tentativa insert charity_ads fallback falhou: {e_c}")
-
-    logger.error(f"Todas as tentativas de salvar regulation_post falharam: {last_error}")
-    raise HTTPException(
-        status_code=500,
-        detail=f"Erro ao salvar publicação: {str(last_error) if last_error else 'Tabela não encontrada'}. Execute o script SQL no Supabase para criar 'regulation_posts'.",
-    )
+        raise HTTPException(status_code=500, detail="Erro interno: retorno de banco de dados vazio ao criar post.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao inserir post em regulation_posts: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Erro ao salvar publicação. Verifique se a tabela 'regulation_posts' foi criada no Supabase.",
+        )
 
 
 @router.get("/posts", response_model=RegulationPostListResponse)
@@ -344,55 +285,8 @@ async def list_regulation_posts(
             items=formatted,
         )
     except Exception as e:
-        logger.warning(f"Select direto em regulation_posts falhou: {e}. Tentando fallback simples...")
-        try:
-            res_simple = await db.table(Tables.REGULATION_POSTS).select("*").in_("status", ["approved", "active"]).order("created_at", desc=True).limit(50).execute()
-            if res_simple.data:
-                formatted = [_format_post(it) for it in res_simple.data]
-                return RegulationPostListResponse(total=len(formatted), page=page, page_size=page_size, items=formatted)
-        except Exception:
-            pass
-
-        # Fallback charity_ads
-        try:
-            res_c = await db.table(Tables.CHARITY_ADS).select("*").ilike("description", "%REGULATION_META:%").in_("status", ["approved", "active"]).order("created_at", desc=True).limit(50).execute()
-            fallback_items = []
-            for c_item in (res_c.data or []):
-                desc = c_item.get("description") or ""
-                real_type = "question"
-                real_cat = "vistos"
-                real_desc = desc
-                images = []
-                if "REGULATION_META:" in desc and "---DESC---" in desc:
-                    parts = desc.split("---DESC---")
-                    meta_str = parts[0].replace("REGULATION_META:", "").strip()
-                    try:
-                        m_obj = json.loads(meta_str)
-                        real_type = m_obj.get("type") or "question"
-                        real_cat = m_obj.get("category") or "vistos"
-                        images = m_obj.get("images") or []
-                    except Exception:
-                        pass
-                    real_desc = parts[1].strip() if len(parts) > 1 else desc
-                
-                title = (c_item.get("title") or "").replace("[QUESTION]", "").replace("[TIP]", "").replace("[DUVIDA]", "").replace("[DICA]", "").strip()
-                p_data = {
-                    "id": c_item.get("id"),
-                    "user_id": c_item.get("user_id"),
-                    "type": real_type,
-                    "category": real_cat,
-                    "title": title,
-                    "content": real_desc,
-                    "images": images or ([c_item.get("image_url")] if c_item.get("image_url") else []),
-                    "likes_count": 0,
-                    "replies_count": 0,
-                    "is_solved": False,
-                    "created_at": c_item.get("created_at"),
-                }
-                fallback_items.append(_format_post(p_data))
-            return RegulationPostListResponse(total=len(fallback_items), page=page, page_size=page_size, items=fallback_items)
-        except Exception:
-            return RegulationPostListResponse(total=0, page=page, page_size=page_size, items=[])
+        logger.error(f"Erro ao buscar posts de regulation_posts: {e}")
+        return RegulationPostListResponse(total=0, page=page, page_size=page_size, items=[])
 
 
 @router.get("/posts/mine", response_model=List[RegulationPostResponse])
@@ -412,53 +306,8 @@ async def list_my_regulation_posts(
         )
         return [_format_post(it, user_dict=user) for it in (res.data or [])]
     except Exception as e:
-        logger.warning(f"Erro ao buscar regulation posts do usuário: {e}. Tentando fallback...")
-        try:
-            res_simple = await db.table(Tables.REGULATION_POSTS).select("*").eq("user_id", user["id"]).order("created_at", desc=True).execute()
-            if res_simple.data:
-                return [_format_post(it, user_dict=user) for it in res_simple.data]
-        except Exception:
-            pass
-
-        try:
-            res_c = await db.table(Tables.CHARITY_ADS).select("*").eq("user_id", user["id"]).ilike("description", "%REGULATION_META:%").order("created_at", desc=True).execute()
-            fallback_items = []
-            for c_item in (res_c.data or []):
-                desc = c_item.get("description") or ""
-                real_type = "question"
-                real_cat = "vistos"
-                real_desc = desc
-                images = []
-                if "REGULATION_META:" in desc and "---DESC---" in desc:
-                    parts = desc.split("---DESC---")
-                    meta_str = parts[0].replace("REGULATION_META:", "").strip()
-                    try:
-                        m_obj = json.loads(meta_str)
-                        real_type = m_obj.get("type") or "question"
-                        real_cat = m_obj.get("category") or "vistos"
-                        images = m_obj.get("images") or []
-                    except Exception:
-                        pass
-                    real_desc = parts[1].strip() if len(parts) > 1 else desc
-                
-                title = (c_item.get("title") or "").replace("[QUESTION]", "").replace("[TIP]", "").replace("[DUVIDA]", "").replace("[DICA]", "").strip()
-                p_data = {
-                    "id": c_item.get("id"),
-                    "user_id": c_item.get("user_id"),
-                    "type": real_type,
-                    "category": real_cat,
-                    "title": title,
-                    "content": real_desc,
-                    "images": images or ([c_item.get("image_url")] if c_item.get("image_url") else []),
-                    "likes_count": 0,
-                    "replies_count": 0,
-                    "is_solved": False,
-                    "created_at": c_item.get("created_at"),
-                }
-                fallback_items.append(_format_post(p_data, user_dict=user))
-            return fallback_items
-        except Exception:
-            return []
+        logger.error(f"Erro ao buscar regulation posts do usuário: {e}")
+        return []
 
 
 @router.get("/posts/{post_id}", response_model=RegulationPostResponse)
@@ -527,51 +376,29 @@ async def get_regulation_post_detail(
                     "is_solved": False,
                     "users": c_item.get("users"),
                     "created_at": c_item.get("created_at"),
-                }
-        except Exception as e_cf:
-            logger.warning(f"Fallback charity_ads lookup falhou: {e_cf}")
-
-    # Fallback na tabela groups se salvo via groups fallback
-    if not post_data:
-        try:
-            res_g = await db.table(Tables.GROUPS).select("*").eq("id", post_id).limit(1).execute()
-            if res_g.data:
-                g_item = res_g.data[0]
-                desc = g_item.get("description") or ""
-                real_type = "question"
-                real_cat = "vistos"
-                real_desc = desc
-                images = []
-                if "REGULATION_META:" in desc and "---DESC---" in desc:
-                    parts = desc.split("---DESC---")
-                    meta_str = parts[0].replace("REGULATION_META:", "").strip()
-                    try:
-                        m_obj = json.loads(meta_str)
-                        real_type = m_obj.get("type") or "question"
-                        real_cat = m_obj.get("category") or "vistos"
-                        images = m_obj.get("images") or []
-                    except Exception:
-                        pass
-                    real_desc = parts[1].strip() if len(parts) > 1 else desc
-                title = (g_item.get("name") or "").replace("[QUESTION]", "").replace("[TIP]", "").replace("[DUVIDA]", "").replace("[DICA]", "").strip()
-                post_data = {
-                    "id": g_item.get("id"),
-                    "user_id": g_item.get("user_id") or "anonymous",
-                    "type": real_type,
-                    "category": real_cat,
-                    "title": title,
-                    "content": real_desc,
-                    "images": images,
-                    "likes_count": 0,
-                    "replies_count": 0,
-                    "is_solved": False,
-                    "created_at": g_item.get("created_at"),
-                }
-        except Exception:
-            pass
-
-    if not post_data:
-        raise HTTPException(status_code=404, detail="Publicação não encontrada.")
+@router.get("/posts/{post_id}", response_model=RegulationPostResponse)
+async def get_regulation_post(
+    post_id: str,
+    db: AsyncClient = Depends(get_db),
+    visitor: Optional[dict] = Depends(get_optional_user),
+):
+    """Retorna os detalhes de uma publicação específica com suas respostas."""
+    try:
+        res = (
+            await db.table(Tables.REGULATION_POSTS)
+            .select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)")
+            .eq("id", post_id)
+            .limit(1)
+            .execute()
+        )
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Publicação não encontrada.")
+        post_data = res.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao buscar post: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao buscar publicação.")
 
     post_status = post_data.get("status") or "pending"
     if post_status not in ["approved", "active"]:
@@ -583,26 +410,30 @@ async def get_regulation_post_detail(
                 detail="Esta publicação está aguardando moderação e ainda não foi aprovada.",
             )
 
+    # Incrementa visualizações
+    try:
+        await db.table(Tables.REGULATION_POSTS).update({
+            "views_count": (post_data.get("views_count") or 0) + 1
+        }).eq("id", post_id).execute()
+    except Exception:
+        pass
+
     # Verifica curtida no post
     has_liked_post = False
     if visitor:
-        fallback_key = f"{visitor['id']}:post:{post_id}"
-        if fallback_key in _FALLBACK_LIKES:
-            has_liked_post = True
-        else:
-            try:
-                res_lk = (
-                    await db.table(Tables.REGULATION_LIKES)
-                    .select("id")
-                    .eq("user_id", visitor["id"])
-                    .eq("target_type", "post")
-                    .eq("target_id", post_id)
-                    .limit(1)
-                    .execute()
-                )
-                has_liked_post = bool(res_lk.data)
-            except Exception:
-                pass
+        try:
+            res_lk = (
+                await db.table(Tables.REGULATION_LIKES)
+                .select("id")
+                .eq("user_id", visitor["id"])
+                .eq("target_type", "post")
+                .eq("target_id", post_id)
+                .limit(1)
+                .execute()
+            )
+            has_liked_post = bool(res_lk.data)
+        except Exception:
+            pass
 
     # Busca respostas
     replies_raw = []
@@ -618,77 +449,12 @@ async def get_regulation_post_detail(
             .execute()
         )
         replies_raw = res_rep.data or []
-    except Exception:
-        try:
-            res_rep_simple = await db.table(Tables.REGULATION_REPLIES).select("*").eq("post_id", post_id).execute()
-            replies_raw = res_rep_simple.data or []
-        except Exception:
-            pass
-
-    # Fallback para respostas em item_comments ou GROUPS se regulation_replies estiver vazia
-    if not replies_raw:
-        try:
-            res_ic = (
-                await db.table(Tables.ITEM_COMMENTS)
-                .select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)")
-                .eq("target_type", "regulation_post")
-                .eq("target_id", post_id)
-                .order("created_at", desc=False)
-                .execute()
-            )
-            for ic in (res_ic.data or []):
-                replies_raw.append({
-                    "id": ic.get("id"),
-                    "post_id": post_id,
-                    "user_id": ic.get("user_id"),
-                    "content": ic.get("message") or "",
-                    "likes_count": 0,
-                    "is_best_answer": False,
-                    "status": "active",
-                    "created_at": ic.get("created_at"),
-                    "users": ic.get("users"),
-                })
-        except Exception:
-            pass
-
-    if not replies_raw:
-        try:
-            chat_cat = f"chat:regulation_post:{post_id}"
-            res_g = (
-                await db.table(Tables.GROUPS)
-                .select("*, users:created_by(id, name, avatar_url, city, is_verified, is_admin)")
-                .eq("category", chat_cat)
-                .order("created_at", desc=False)
-                .execute()
-            )
-            for g in (res_g.data or []):
-                replies_raw.append({
-                    "id": g.get("id"),
-                    "post_id": post_id,
-                    "user_id": g.get("created_by"),
-                    "content": g.get("description") or "",
-                    "likes_count": 0,
-                    "is_best_answer": False,
-                    "status": "active",
-                    "created_at": g.get("created_at"),
-                    "users": g.get("users"),
-                })
-        except Exception:
-            pass
-
-    # Inclui respostas da memória
-    existing_ids = {str(r.get("id")) for r in replies_raw}
-    for mem_r in _FALLBACK_REPLIES:
-        if str(mem_r.get("post_id")) == str(post_id) and str(mem_r.get("id")) not in existing_ids:
-            replies_raw.append(mem_r)
+    except Exception as e:
+        logger.error(f"Erro ao buscar respostas: {e}")
 
     # Verifica curtidas nas respostas
     liked_reply_ids = set()
     if visitor and replies_raw:
-        for r in replies_raw:
-            r_key = f"{visitor['id']}:reply:{r['id']}"
-            if r_key in _FALLBACK_LIKES:
-                liked_reply_ids.add(str(r["id"]))
         try:
             r_ids = [str(r["id"]) for r in replies_raw]
             res_rlk = (
@@ -789,39 +555,26 @@ async def delete_regulation_post(
     db: AsyncClient = Depends(get_db),
 ):
     """Exclui uma publicação (autor ou admin)."""
-    post = None
-    actual_table = Tables.REGULATION_POSTS
-
-    # 1. Tenta buscar na tabela principal
     try:
         res_check = await db.table(Tables.REGULATION_POSTS).select("user_id").eq("id", post_id).limit(1).execute()
-        if res_check.data:
-            post = res_check.data[0]
-    except Exception:
-        pass
-
-    # 2. Fallback: busca na tabela charity_ads
-    if not post:
-        try:
-            res_check = await db.table(Tables.CHARITY_ADS).select("user_id").eq("id", post_id).limit(1).execute()
-            if res_check.data:
-                post = res_check.data[0]
-                actual_table = Tables.CHARITY_ADS
-        except Exception:
-            pass
-
-    if not post:
-        raise HTTPException(status_code=404, detail="Publicação não encontrada.")
+        if not res_check.data:
+            raise HTTPException(status_code=404, detail="Publicação não encontrada.")
+        post = res_check.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao buscar post para exclusão: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao buscar publicação.")
 
     if str(post.get("user_id")) != str(user["id"]) and not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Você não tem permissão para apagar esta publicação.")
 
     try:
-        await db.table(actual_table).delete().eq("id", post_id).execute()
+        await db.table(Tables.REGULATION_POSTS).delete().eq("id", post_id).execute()
     except Exception as e:
-        logger.error(f"Erro ao deletar post de {actual_table}: {e}")
+        logger.error(f"Erro ao deletar post de regulation_posts: {e}")
         # Soft delete fallback
-        await db.table(actual_table).update({"status": "deleted"}).eq("id", post_id).execute()
+        await db.table(Tables.REGULATION_POSTS).update({"status": "deleted"}).eq("id", post_id).execute()
 
     return None
 
@@ -836,9 +589,8 @@ async def toggle_like_post(
     user: dict = Depends(get_current_user),
     db: AsyncClient = Depends(get_db),
 ):
-    """Curte ou remove curtida de uma publicação de regularização de forma resiliente."""
+    """Curte ou remove curtida de uma publicação de regularização."""
     user_id = str(user["id"])
-    fallback_key = f"{user_id}:post:{post_id}"
 
     try:
         res_check = (
@@ -851,54 +603,35 @@ async def toggle_like_post(
             .execute()
         )
 
-        has_liked = bool(res_check.data) or (fallback_key in _FALLBACK_LIKES)
+        has_liked = bool(res_check.data)
 
         if has_liked:
             # Descurtir
-            try:
-                await db.table(Tables.REGULATION_LIKES).delete().eq("user_id", user_id).eq("target_type", "post").eq("target_id", post_id).execute()
-            except Exception:
-                pass
-            _FALLBACK_LIKES.discard(fallback_key)
+            await db.table(Tables.REGULATION_LIKES).delete().eq("user_id", user_id).eq("target_type", "post").eq("target_id", post_id).execute()
 
             current_likes = 0
-            try:
-                post_res = await db.table(Tables.REGULATION_POSTS).select("likes_count").eq("id", post_id).limit(1).execute()
-                if post_res.data:
-                    current_likes = max(0, int(post_res.data[0].get("likes_count") or 1) - 1)
-                    await db.table(Tables.REGULATION_POSTS).update({"likes_count": current_likes}).eq("id", post_id).execute()
-            except Exception:
-                pass
+            post_res = await db.table(Tables.REGULATION_POSTS).select("likes_count").eq("id", post_id).limit(1).execute()
+            if post_res.data:
+                current_likes = max(0, int(post_res.data[0].get("likes_count") or 1) - 1)
+                await db.table(Tables.REGULATION_POSTS).update({"likes_count": current_likes}).eq("id", post_id).execute()
             return RegulationLikeToggleResponse(has_liked=False, likes_count=current_likes, message="Curtida removida.")
         else:
             # Curtir
-            try:
-                await db.table(Tables.REGULATION_LIKES).insert({
-                    "user_id": user_id,
-                    "target_type": "post",
-                    "target_id": post_id,
-                }).execute()
-            except Exception:
-                pass
-            _FALLBACK_LIKES.add(fallback_key)
+            await db.table(Tables.REGULATION_LIKES).insert({
+                "user_id": user_id,
+                "target_type": "post",
+                "target_id": post_id,
+            }).execute()
 
             current_likes = 1
-            try:
-                post_res = await db.table(Tables.REGULATION_POSTS).select("likes_count").eq("id", post_id).limit(1).execute()
-                if post_res.data:
-                    current_likes = int(post_res.data[0].get("likes_count") or 0) + 1
-                    await db.table(Tables.REGULATION_POSTS).update({"likes_count": current_likes}).eq("id", post_id).execute()
-            except Exception:
-                pass
+            post_res = await db.table(Tables.REGULATION_POSTS).select("likes_count").eq("id", post_id).limit(1).execute()
+            if post_res.data:
+                current_likes = int(post_res.data[0].get("likes_count") or 0) + 1
+                await db.table(Tables.REGULATION_POSTS).update({"likes_count": current_likes}).eq("id", post_id).execute()
             return RegulationLikeToggleResponse(has_liked=True, likes_count=current_likes, message="Publicação curtida!")
     except Exception as e:
-        logger.warning(f"Erro no toggle like post, aplicando fallback limpo: {e}")
-        if fallback_key in _FALLBACK_LIKES:
-            _FALLBACK_LIKES.discard(fallback_key)
-            return RegulationLikeToggleResponse(has_liked=False, likes_count=0, message="Curtida removida.")
-        else:
-            _FALLBACK_LIKES.add(fallback_key)
-            return RegulationLikeToggleResponse(has_liked=True, likes_count=1, message="Publicação curtida!")
+        logger.error(f"Erro no toggle like post: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao registrar curtida.")
 
 
 @router.post("/posts/{post_id}/mark-solved")
@@ -980,7 +713,7 @@ async def create_regulation_reply(
     user: dict = Depends(get_current_user),
     db: AsyncClient = Depends(get_db),
 ):
-    """Adiciona uma resposta a uma dúvida ou dica com tolerância a falhas e fallbacks."""
+    """Adiciona uma resposta a uma dúvida ou dica."""
     _check_banned_words(payload.content)
 
     # 1. Rate Limit diário (máx 10 respostas por dia por usuário)
@@ -1014,7 +747,6 @@ async def create_regulation_reply(
         "status": "active",
     }
 
-    # Tentativa 1: Tabela REGULATION_REPLIES
     try:
         res = await db.table(Tables.REGULATION_REPLIES).insert(record).execute()
         if res.data:
@@ -1025,81 +757,12 @@ async def create_regulation_reply(
             except Exception:
                 pass
             return _format_reply(res.data[0], user_dict=user)
+        raise HTTPException(status_code=500, detail="Erro interno ao criar resposta.")
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.warning(f"Erro ao inserir em regulation_replies: {e}. Tentando fallback em ITEM_COMMENTS...")
-
-    # Tentativa 2: Fallback em ITEM_COMMENTS
-    try:
-        ic_record = {
-            "target_type": "regulation_post",
-            "target_id": post_id,
-            "user_id": user["id"],
-            "user_name": user.get("name") or "Brasileiro(a)",
-            "message": payload.content.strip(),
-        }
-        res_ic = await db.table(Tables.ITEM_COMMENTS).insert(ic_record).execute()
-        if res_ic.data:
-            ic_created = res_ic.data[0]
-            rep_obj = {
-                "id": str(ic_created["id"]),
-                "post_id": post_id,
-                "user_id": user["id"],
-                "content": payload.content.strip(),
-                "likes_count": 0,
-                "is_best_answer": False,
-                "status": "active",
-                "created_at": ic_created.get("created_at") or utcnow().isoformat(),
-            }
-            _FALLBACK_REPLIES.append(rep_obj)
-            return _format_reply(rep_obj, user_dict=user)
-    except Exception as e_ic:
-        logger.warning(f"Erro ao inserir resposta em item_comments: {e_ic}")
-
-    # Tentativa 3: Fallback em GROUPS
-    try:
-        chat_cat = f"chat:regulation_post:{post_id}"
-        group_msg_record = {
-            "name": user.get("name") or "Brasileiro(a)",
-            "description": payload.content.strip(),
-            "category": chat_cat,
-            "city": "França",
-            "platform": "regulation",
-            "invite_link": f"chat://regulation_post/{post_id}",
-            "is_approved": True,
-            "is_active": True,
-            "created_by": user["id"],
-        }
-        res_g = await db.table(Tables.GROUPS).insert(group_msg_record).execute()
-        if res_g.data:
-            g_created = res_g.data[0]
-            rep_obj = {
-                "id": str(g_created["id"]),
-                "post_id": post_id,
-                "user_id": user["id"],
-                "content": payload.content.strip(),
-                "likes_count": 0,
-                "is_best_answer": False,
-                "status": "active",
-                "created_at": g_created.get("created_at") or utcnow().isoformat(),
-            }
-            _FALLBACK_REPLIES.append(rep_obj)
-            return _format_reply(rep_obj, user_dict=user)
-    except Exception as e_g:
-        logger.warning(f"Erro ao inserir resposta em groups fallback: {e_g}")
-
-    # Tentativa 4: Retorno garantido em memória
-    rep_obj = {
-        "id": f"rep-{int(utcnow().timestamp() * 1000)}",
-        "post_id": post_id,
-        "user_id": user["id"],
-        "content": payload.content.strip(),
-        "likes_count": 0,
-        "is_best_answer": False,
-        "status": "active",
-        "created_at": utcnow().isoformat(),
-    }
-    _FALLBACK_REPLIES.append(rep_obj)
-    return _format_reply(rep_obj, user_dict=user)
+        logger.error(f"Erro ao inserir em regulation_replies: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao criar resposta. Verifique se a tabela 'regulation_replies' foi criada.")
 
 
 @router.get("/posts/{post_id}/replies", response_model=List[RegulationReplyResponse])
@@ -1123,76 +786,10 @@ async def list_regulation_replies(
         )
         raw = res.data or []
     except Exception as e:
-        logger.warning(f"Erro ao listar respostas de regulation_replies: {e}")
-        try:
-            res_simple = await db.table(Tables.REGULATION_REPLIES).select("*").eq("post_id", post_id).execute()
-            raw = res_simple.data or []
-        except Exception:
-            pass
-
-    # Fallback em ITEM_COMMENTS se raw estiver vazio
-    if not raw:
-        try:
-            res_ic = (
-                await db.table(Tables.ITEM_COMMENTS)
-                .select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)")
-                .eq("target_type", "regulation_post")
-                .eq("target_id", post_id)
-                .order("created_at", desc=False)
-                .execute()
-            )
-            for ic in (res_ic.data or []):
-                raw.append({
-                    "id": ic.get("id"),
-                    "post_id": post_id,
-                    "user_id": ic.get("user_id"),
-                    "content": ic.get("message") or "",
-                    "likes_count": 0,
-                    "is_best_answer": False,
-                    "status": "active",
-                    "created_at": ic.get("created_at"),
-                    "users": ic.get("users"),
-                })
-        except Exception:
-            pass
-
-    if not raw:
-        try:
-            chat_cat = f"chat:regulation_post:{post_id}"
-            res_g = (
-                await db.table(Tables.GROUPS)
-                .select("*, users:created_by(id, name, avatar_url, city, is_verified, is_admin)")
-                .eq("category", chat_cat)
-                .order("created_at", desc=False)
-                .execute()
-            )
-            for g in (res_g.data or []):
-                raw.append({
-                    "id": g.get("id"),
-                    "post_id": post_id,
-                    "user_id": g.get("created_by"),
-                    "content": g.get("description") or "",
-                    "likes_count": 0,
-                    "is_best_answer": False,
-                    "status": "active",
-                    "created_at": g.get("created_at"),
-                    "users": g.get("users"),
-                })
-        except Exception:
-            pass
-
-    # Inclui respostas em memória
-    existing_ids = {str(r.get("id")) for r in raw}
-    for mem_r in _FALLBACK_REPLIES:
-        if str(mem_r.get("post_id")) == str(post_id) and str(mem_r.get("id")) not in existing_ids:
-            raw.append(mem_r)
+        logger.error(f"Erro ao listar respostas de regulation_replies: {e}")
 
     liked_ids = set()
     if visitor and raw:
-        for r in raw:
-            r_key = f"{visitor['id']}:reply:{r['id']}"
-            if r_key in _FALLBACK_LIKES:
-                liked_ids.add(str(r["id"]))
         try:
             r_ids = [str(r["id"]) for r in raw]
             res_lk = (
@@ -1293,7 +890,6 @@ async def toggle_like_reply(
 ):
     """Curte ou remove curtida de uma resposta."""
     user_id = str(user["id"])
-    fallback_key = f"{user_id}:reply:{reply_id}"
 
     try:
         res_check = (
@@ -1306,52 +902,33 @@ async def toggle_like_reply(
             .execute()
         )
 
-        has_liked = bool(res_check.data) or (fallback_key in _FALLBACK_LIKES)
+        has_liked = bool(res_check.data)
 
         if has_liked:
-            try:
-                await db.table(Tables.REGULATION_LIKES).delete().eq("user_id", user_id).eq("target_type", "reply").eq("target_id", reply_id).execute()
-            except Exception:
-                pass
-            _FALLBACK_LIKES.discard(fallback_key)
+            await db.table(Tables.REGULATION_LIKES).delete().eq("user_id", user_id).eq("target_type", "reply").eq("target_id", reply_id).execute()
 
             current_likes = 0
-            try:
-                rep_res = await db.table(Tables.REGULATION_REPLIES).select("likes_count").eq("id", reply_id).limit(1).execute()
-                if rep_res.data:
-                    current_likes = max(0, int(rep_res.data[0].get("likes_count") or 1) - 1)
-                    await db.table(Tables.REGULATION_REPLIES).update({"likes_count": current_likes}).eq("id", reply_id).execute()
-            except Exception:
-                pass
+            rep_res = await db.table(Tables.REGULATION_REPLIES).select("likes_count").eq("id", reply_id).limit(1).execute()
+            if rep_res.data:
+                current_likes = max(0, int(rep_res.data[0].get("likes_count") or 1) - 1)
+                await db.table(Tables.REGULATION_REPLIES).update({"likes_count": current_likes}).eq("id", reply_id).execute()
             return RegulationLikeToggleResponse(has_liked=False, likes_count=current_likes, message="Curtida removida da resposta.")
         else:
-            try:
-                await db.table(Tables.REGULATION_LIKES).insert({
-                    "user_id": user_id,
-                    "target_type": "reply",
-                    "target_id": reply_id,
-                }).execute()
-            except Exception:
-                pass
-            _FALLBACK_LIKES.add(fallback_key)
+            await db.table(Tables.REGULATION_LIKES).insert({
+                "user_id": user_id,
+                "target_type": "reply",
+                "target_id": reply_id,
+            }).execute()
 
             current_likes = 1
-            try:
-                rep_res = await db.table(Tables.REGULATION_REPLIES).select("likes_count").eq("id", reply_id).limit(1).execute()
-                if rep_res.data:
-                    current_likes = int(rep_res.data[0].get("likes_count") or 0) + 1
-                    await db.table(Tables.REGULATION_REPLIES).update({"likes_count": current_likes}).eq("id", reply_id).execute()
-            except Exception:
-                pass
+            rep_res = await db.table(Tables.REGULATION_REPLIES).select("likes_count").eq("id", reply_id).limit(1).execute()
+            if rep_res.data:
+                current_likes = int(rep_res.data[0].get("likes_count") or 0) + 1
+                await db.table(Tables.REGULATION_REPLIES).update({"likes_count": current_likes}).eq("id", reply_id).execute()
             return RegulationLikeToggleResponse(has_liked=True, likes_count=current_likes, message="Resposta curtida!")
     except Exception as e:
-        logger.warning(f"Erro no toggle like reply, aplicando fallback: {e}")
-        if fallback_key in _FALLBACK_LIKES:
-            _FALLBACK_LIKES.discard(fallback_key)
-            return RegulationLikeToggleResponse(has_liked=False, likes_count=0, message="Curtida removida da resposta.")
-        else:
-            _FALLBACK_LIKES.add(fallback_key)
-            return RegulationLikeToggleResponse(has_liked=True, likes_count=1, message="Resposta curtida!")
+        logger.error(f"Erro no toggle like reply: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno ao registrar curtida na resposta.")
 
 
 # ==============================================================================
