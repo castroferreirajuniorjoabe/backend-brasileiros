@@ -245,6 +245,9 @@ async def resend_verification_email(
 @router.post("/google", response_model=TokenResponse)
 async def google_auth(payload: GoogleOAuthRequest, db: AsyncClient = Depends(get_db)):
     """Login ou cadastro automático via Google OAuth."""
+    import logging
+    logger = logging.getLogger(__name__)
+
     email = payload.email
     name = payload.name or "Usuário Google"
     avatar_url = payload.avatar_url
@@ -271,50 +274,65 @@ async def google_auth(payload: GoogleOAuthRequest, db: AsyncClient = Depends(get
 
     email_clean = email.strip().lower()
 
-    # Busca usuário existente por email
-    result = (
-        await db.table(Tables.USERS)
-        .select("*")
-        .ilike("email", email_clean)
-        .limit(1)
-        .execute()
-    )
+    try:
+        # Busca usuário existente por email
+        result = (
+            await db.table(Tables.USERS)
+            .select("*")
+            .ilike("email", email_clean)
+            .limit(1)
+            .execute()
+        )
 
-    if result.data:
-        user = result.data[0]
-        if user.get("is_blocked"):
-            raise HTTPException(status_code=403, detail="Usuário bloqueado pelo administrador.")
-        
-        # Atualiza avatar se não tiver
-        if avatar_url and not user.get("avatar_url"):
+        if result.data:
+            user = result.data[0]
+            if user.get("is_blocked"):
+                raise HTTPException(status_code=403, detail="Usuário bloqueado pelo administrador.")
+            
+            # Atualiza avatar se não tiver
+            if avatar_url and not user.get("avatar_url"):
+                try:
+                    await db.table(Tables.USERS).update({"avatar_url": avatar_url}).eq("id", user["id"]).execute()
+                    user["avatar_url"] = avatar_url
+                except Exception:
+                    pass
+        else:
+            # Cria novo usuário via Google
+            # Gera telefone placeholder único para evitar violação de unique constraint
+            import uuid
+            placeholder_phone = f"+33{str(uuid.uuid4().int)[:9]}"
+            new_record = {
+                "name": name,
+                "email": email_clean,
+                "phone": placeholder_phone,
+                "city": "Paris",
+                "password_hash": hash_password(generate_verification_token()),
+                "email_verified": True,
+                "phone_verified": False,
+                "is_admin": False,
+                "is_blocked": False,
+                "avatar_url": avatar_url,
+            }
+            # Tenta inserir com referral_code, cai sem ele se a coluna não existir
             try:
-                await db.table(Tables.USERS).update({"avatar_url": avatar_url}).eq("id", user["id"]).execute()
-                user["avatar_url"] = avatar_url
+                referral_code = generate_gift_code("REF")
+                res_ins = await db.table(Tables.USERS).insert({**new_record, "referral_code": referral_code}).execute()
             except Exception:
-                pass
-    else:
-        # Cria novo usuário via Google
-        referral_code = generate_gift_code("REF")
-        new_record = {
-            "name": name,
-            "email": email_clean,
-            "phone": "+33000000000",
-            "city": "Paris",
-            "password_hash": hash_password(generate_verification_token()),
-            "email_verified": True,
-            "phone_verified": False,
-            "is_admin": False,
-            "is_blocked": False,
-            "avatar_url": avatar_url,
-        }
-        try:
-            res_ins = await db.table(Tables.USERS).insert({**new_record, "referral_code": referral_code}).execute()
-        except Exception:
-            res_ins = await db.table(Tables.USERS).insert(new_record).execute()
-        user = res_ins.data[0]
+                try:
+                    res_ins = await db.table(Tables.USERS).insert(new_record).execute()
+                except Exception as insert_err:
+                    logger.error(f"[google_auth] Erro ao inserir usuário Google: {insert_err}")
+                    raise HTTPException(status_code=500, detail=f"Erro ao criar conta: {str(insert_err)}")
+            user = res_ins.data[0]
 
-    token = create_access_token(user["id"], user.get("is_admin", False))
-    return TokenResponse(access_token=token, user=_user_response(user))
+        token = create_access_token(user["id"], user.get("is_admin", False))
+        return TokenResponse(access_token=token, user=_user_response(user))
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[google_auth] Erro inesperado para {email_clean}: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro interno ao autenticar com Google: {str(e)}")
 
 
 @router.post("/phone/send-code")
