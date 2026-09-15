@@ -941,6 +941,17 @@ async def admin_update_record(
                 except Exception:
                     pass
 
+        elif table in ["regulation_posts", "regulation-posts"]:
+            try:
+                charity_payload = dict(payload)
+                if "content" in charity_payload and "description" not in charity_payload:
+                    charity_payload["description"] = charity_payload.pop("content")
+                res_c = await db.table(Tables.CHARITY_ADS).update(charity_payload).eq("id", record_id).execute()
+                if res_c.data:
+                    result = res_c
+            except Exception:
+                pass
+
     if not result or not result.data:
         raise HTTPException(status_code=404, detail="Registro não encontrado.")
     return result.data[0]
@@ -972,6 +983,10 @@ async def admin_delete_record(
         "moving-sales": Tables.MOVING_SALES,
         "artists": Tables.ARTISTS,
         "artist_events": Tables.ARTIST_EVENTS,
+        "regulation_posts": Tables.REGULATION_POSTS,
+        "regulation-posts": Tables.REGULATION_POSTS,
+        "regulation_replies": Tables.REGULATION_REPLIES,
+        "regulation_reports": Tables.REGULATION_REPORTS,
     }
     actual_table = table_map.get(table) or MANAGEABLE_TABLES.get(table) or table
 
