@@ -343,6 +343,7 @@ async def list_pending(
                 data2 = res2.data or []
             except Exception:
                 data2 = []
+            return data1 + data2
         elif kind in ["regulation-posts", "regulation_posts"]:
             all_raw = []
             try:
