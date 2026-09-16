@@ -26,7 +26,7 @@ async def main():
         {
             "name": "Consulado-Geral do Brasil em Marseille",
             "email": "consulado.marseille@brasileirosfranca.app",
-            "phone": "+33491571400",
+            "phone": "+33486838850",
             "city": "Marseille",
             "password_hash": hash_password("consulado123"),
             "email_verified": True,
