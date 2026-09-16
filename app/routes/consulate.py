@@ -50,8 +50,12 @@ async def create_post(
         
     data = payload.model_dump(exclude_unset=True)
     
-    # If the user is a specific consulate, enforce they post for their own region?
-    # Let's trust they select correctly, or validate based on email.
+    # Enforce jurisdiction
+    if current_user.get("user_type") == UserType.CONSULATE and current_user.get("city"):
+        user_consulate = current_user["city"].lower()
+        if data.get("consulate") and data["consulate"].lower() != user_consulate:
+            raise HTTPException(status_code=403, detail="Você só pode publicar para sua própria jurisdição.")
+        data["consulate"] = user_consulate
     
     # Ensure times are serialized properly if needed, pydantic usually handles it to dict, but let's be safe.
     if data.get("event_date"):
