@@ -28,6 +28,13 @@ class Tables:
     REGULATION_REPLIES = "regulation_replies"
     REGULATION_LIKES = "regulation_likes"
     REGULATION_REPORTS = "regulation_reports"
+    CONSULATE_POSTS = "consulate_posts"
+
+
+class UserType(str, Enum):
+    USER = "user"
+    CONSULATE = "consulate"
+    ADMIN = "admin"
 
 
 class AdType(str, Enum):

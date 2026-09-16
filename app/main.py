@@ -19,6 +19,7 @@ from app.routes import (
     associations,
     auth,
     charity_ads,
+    consulate,
     gift_codes,
     groups,
     item_comments,
@@ -157,6 +158,7 @@ app.include_router(job_ads.router)
 app.include_router(moving_sales.router)
 app.include_router(artists.router)
 app.include_router(regulation.router)
+app.include_router(consulate.router)
 app.include_router(news_carousel.router)
 app.include_router(arrival_guide.router)
 app.include_router(gift_codes.router)

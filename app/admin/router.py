@@ -48,6 +48,7 @@ MODERATED = {
     "artists": (Tables.ARTISTS, ModerationStatus),
     "regulation-posts": (Tables.REGULATION_POSTS, ModerationStatus),
     "regulation_posts": (Tables.REGULATION_POSTS, ModerationStatus),
+    "consulate_posts": (Tables.CONSULATE_POSTS, ModerationStatus),
 }
 
 # Tabelas gerenciáveis via endpoints genéricos
@@ -78,6 +79,7 @@ MANAGEABLE_TABLES = {
     "regulation-posts": Tables.REGULATION_POSTS,
     "regulation_replies": Tables.REGULATION_REPLIES,
     "regulation_reports": Tables.REGULATION_REPORTS,
+    "consulate_posts": Tables.CONSULATE_POSTS,
 }
 
 
@@ -839,7 +841,22 @@ async def run_ranking_manually(
     return {"ranked": len(rows), "top": rows[:3]}
 
 
-# ---------- Gestão genérica de tabelas ----------
+@router.post("/consulate/posts/{post_id}/archive")
+async def archive_consulate_post(post_id: str, db: AsyncClient = Depends(get_db)):
+    res = await db.table(Tables.CONSULATE_POSTS).update({"status": "archived"}).eq("id", post_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Postagem não encontrada.")
+    return {"message": "Postagem arquivada com sucesso.", "post": res.data[0]}
+
+@router.post("/consulate/posts/{post_id}/unarchive")
+async def unarchive_consulate_post(post_id: str, db: AsyncClient = Depends(get_db)):
+    res = await db.table(Tables.CONSULATE_POSTS).update({"status": "active"}).eq("id", post_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Postagem não encontrada.")
+    return {"message": "Postagem desarquivada com sucesso.", "post": res.data[0]}
+
+
+# ---------- Listagem Genérica (Admin Dashboard) ----------
 
 @router.get("/tables/{table}")
 async def admin_list_table(

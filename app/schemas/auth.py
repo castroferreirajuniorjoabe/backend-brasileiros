@@ -69,6 +69,7 @@ class UserResponse(BaseModel):
     is_blocked: bool = False
     referral_code: str | None = None
     created_at: str | None = None
+    user_type: str = "user"
 
 
 class UserUpdateRequest(BaseModel):
