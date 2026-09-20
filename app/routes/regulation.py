@@ -376,29 +376,13 @@ async def get_regulation_post_detail(
                     "is_solved": False,
                     "users": c_item.get("users"),
                     "created_at": c_item.get("created_at"),
-@router.get("/posts/{post_id}", response_model=RegulationPostResponse)
-async def get_regulation_post(
-    post_id: str,
-    db: AsyncClient = Depends(get_db),
-    visitor: Optional[dict] = Depends(get_optional_user),
-):
-    """Retorna os detalhes de uma publicação específica com suas respostas."""
-    try:
-        res = (
-            await db.table(Tables.REGULATION_POSTS)
-            .select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)")
-            .eq("id", post_id)
-            .limit(1)
-            .execute()
-        )
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Publicação não encontrada.")
-        post_data = res.data[0]
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Erro ao buscar post: {e}")
-        raise HTTPException(status_code=500, detail="Erro interno ao buscar publicação.")
+                    "status": c_item.get("status") or "approved",
+                }
+        except Exception as e_fallback:
+            logger.warning(f"Fallback charity_ads falhou: {e_fallback}")
+
+    if not post_data:
+        raise HTTPException(status_code=404, detail="Publicação não encontrada.")
 
     post_status = post_data.get("status") or "pending"
     if post_status not in ["approved", "active"]:
