@@ -29,6 +29,15 @@ class Tables:
     REGULATION_LIKES = "regulation_likes"
     REGULATION_REPORTS = "regulation_reports"
     CONSULATE_POSTS = "consulate_posts"
+    INFLUENCERS = "influencers"
+    INFLUENCER_EVENTS = "influencer_events"
+    INFLUENCER_PORTFOLIO = "influencer_portfolio"
+    CHURCHES = "churches"
+    CHURCH_SCHEDULE = "church_schedule"
+    CHURCH_EVENTS = "church_events"
+    CHURCH_GROUPS = "church_groups"
+    CHURCH_LEADERS = "church_leaders"
+    CHURCH_SOCIAL_SERVICES = "church_social_services"
 
 
 class UserType(str, Enum):

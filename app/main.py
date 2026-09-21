@@ -19,9 +19,11 @@ from app.routes import (
     associations,
     auth,
     charity_ads,
+    churches,
     consulate,
     gift_codes,
     groups,
+    influencers,
     item_comments,
     job_ads,
     moving_sales,
@@ -167,6 +169,8 @@ app.include_router(gift_codes.router)
 app.include_router(reports.router)
 app.include_router(payments.router)
 app.include_router(ranking.router)
+app.include_router(influencers.router)
+app.include_router(churches.router)
 
 # Rotas administrativas
 app.include_router(admin_router)

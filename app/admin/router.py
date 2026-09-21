@@ -49,6 +49,8 @@ MODERATED = {
     "regulation-posts": (Tables.REGULATION_POSTS, ModerationStatus),
     "regulation_posts": (Tables.REGULATION_POSTS, ModerationStatus),
     "consulate_posts": (Tables.CONSULATE_POSTS, ModerationStatus),
+    "influencers": (Tables.INFLUENCERS, ModerationStatus),
+    "churches": (Tables.CHURCHES, ModerationStatus),
 }
 
 # Tabelas gerenciáveis via endpoints genéricos
@@ -80,6 +82,8 @@ MANAGEABLE_TABLES = {
     "regulation_replies": Tables.REGULATION_REPLIES,
     "regulation_reports": Tables.REGULATION_REPORTS,
     "consulate_posts": Tables.CONSULATE_POSTS,
+    "influencers": Tables.INFLUENCERS,
+    "churches": Tables.CHURCHES,
 }
 
 
