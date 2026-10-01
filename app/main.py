@@ -21,8 +21,8 @@ from app.routes import (
     charity_ads,
     churches,
     consulate,
-    gift_codes,
     groups,
+    housing,
     influencers,
     item_comments,
     job_ads,
@@ -152,6 +152,7 @@ app.include_router(notifications.router)
 app.include_router(ads.router)
 app.include_router(reviews.router)
 app.include_router(groups.router)
+app.include_router(housing.router)
 app.include_router(associations.router)
 app.include_router(urgent_ads.router)
 app.include_router(charity_ads.router)
@@ -165,7 +166,6 @@ app.include_router(regulation.router)
 app.include_router(consulate.router)
 app.include_router(news_carousel.router)
 app.include_router(arrival_guide.router)
-app.include_router(gift_codes.router)
 app.include_router(reports.router)
 app.include_router(payments.router)
 app.include_router(ranking.router)

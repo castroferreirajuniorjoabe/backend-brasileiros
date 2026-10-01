@@ -51,7 +51,7 @@ async def _attach_ratings(db: AsyncClient, ads: list[dict]) -> list[dict]:
 
 async def _get_ad_or_404(db: AsyncClient, ad_id: str) -> dict:
     result = (
-        await db.table(Tables.ADS).select("*").eq("id", ad_id).limit(1).execute()
+        await db.table(Tables.ADS).select("*").eq("id", ad_id).eq("ad_category", "general").limit(1).execute()
     )
     if not result.data or result.data[0].get("status") == AdStatus.DELETED.value:
         raise HTTPException(status_code=404, detail="Anúncio não encontrado.")
@@ -96,6 +96,7 @@ async def create_ad(
 
     record = {
         "user_id": user["id"],
+        "ad_category": "general",
         "name": name,
         "address": address,
         "city": city,
@@ -184,6 +185,7 @@ async def list_ads(
         db.table(Tables.ADS)
         .select("*", count="exact")
         .eq("status", AdStatus.APPROVED.value)
+        .eq("ad_category", "general")
     )
     if city:
         query = query.ilike("city", f"%{city}%")
@@ -255,6 +257,7 @@ async def list_highlighted(
         await db.table(Tables.ADS)
         .select("*")
         .eq("status", AdStatus.APPROVED.value)
+        .eq("ad_category", "general")
         .eq("is_highlighted", True)
         .order("created_at", desc=True)
         .execute()
@@ -295,6 +298,7 @@ async def list_my_ads(
         await db.table(Tables.ADS)
         .select("*")
         .eq("user_id", user["id"])
+        .eq("ad_category", "general")
         .neq("status", AdStatus.DELETED.value)
         .order("created_at", desc=True)
         .execute()
@@ -337,6 +341,7 @@ async def update_ad(
                 .select("id", count="exact")
                 .eq("ad_id", ad_id)
                 .eq("user_id", user["id"])
+        .eq("ad_category", "general")
                 .gte("created_at", week_start.isoformat())
                 .execute()
             )

@@ -84,17 +84,4 @@ BEGIN
 END $$;
 
 
--- 4. TABELA GIFT CODES
-DO $$
-BEGIN
-    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'gift_codes') THEN
-        ALTER TABLE gift_codes ENABLE ROW LEVEL SECURITY;
-        DROP POLICY IF EXISTS "Leitura publica de gift codes" ON gift_codes;
-        DROP POLICY IF EXISTS "Uso de gift code por qualquer um logado" ON gift_codes;
-        DROP POLICY IF EXISTS "Admin acesso total gift codes" ON gift_codes;
 
-        CREATE POLICY "Leitura publica de gift codes" ON gift_codes FOR SELECT USING (true);
-        CREATE POLICY "Uso de gift code por qualquer um logado" ON gift_codes FOR UPDATE USING (auth.uid() IS NOT NULL);
-        CREATE POLICY "Admin acesso total gift codes" ON gift_codes FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
-    END IF;
-END $$;

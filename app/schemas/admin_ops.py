@@ -2,16 +2,7 @@
 
 from pydantic import BaseModel, Field
 
-from app.models import GiftCodeType, ReportTargetType
-
-
-# ---------- Gift codes ----------
-
-class GiftCodeCreateRequest(BaseModel):
-    type: GiftCodeType = GiftCodeType.HIGHLIGHT
-    quantity: int = Field(default=1, ge=1, le=100)
-    max_uses: int = Field(default=1, ge=1)
-    expires_at: str | None = None
+from app.models import ReportTargetType
 
 
 class GiftCodeRedeemRequest(BaseModel):

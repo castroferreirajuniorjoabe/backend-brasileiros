@@ -57,12 +57,6 @@ def generate_sms_code() -> str:
     return "".join(secrets.choice(string.digits) for _ in range(6))
 
 
-def generate_gift_code(prefix: str = "BNF") -> str:
-    """Código promocional legível, ex.: BNF-8F3K-2Q9Z."""
-    alphabet = string.ascii_uppercase + string.digits
-    part = lambda: "".join(secrets.choice(alphabet) for _ in range(4))
-    return f"{prefix}-{part()}-{part()}"
-
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)

@@ -23,7 +23,6 @@ from app.utils import sms as sms_utils
 from app.utils.deps import get_current_user
 from app.utils.security import (
     create_access_token,
-    generate_gift_code,
     generate_sms_code,
     generate_verification_token,
     hash_password,
@@ -70,7 +69,6 @@ async def register(payload: RegisterRequest, db: AsyncClient = Depends(get_db)):
 
     email_token = generate_verification_token()
     sms_code = generate_sms_code()
-    referral_code = generate_gift_code("REF")
 
     # Código de indicação de outro anunciante (opcional)
     referred_by = None
@@ -105,8 +103,7 @@ async def register(payload: RegisterRequest, db: AsyncClient = Depends(get_db)):
             "email_verification_token": email_token,
             "phone_verification_code": sms_code,
             "phone_code_expires_at": (utcnow() + timedelta(minutes=10)).isoformat(),
-            "referral_code": referral_code,
-            "referred_by": referred_by,
+                "referred_by": referred_by,
         }
         result = await db.table(Tables.USERS).insert(extended_record).execute()
     except Exception:
@@ -414,7 +411,6 @@ async def phone_verify_login(payload: VerifyPhoneLoginRequest, db: AsyncClient =
     else:
         # Novo usuário por telefone
         email_temp = f"user_{phone.replace('+', '')}@brasileirosnafranca.com"
-        referral_code = generate_gift_code("REF")
         new_record = {
             "name": f"Brasileiro ({phone[-4:]})",
             "email": email_temp,

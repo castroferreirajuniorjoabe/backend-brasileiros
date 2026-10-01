@@ -58,11 +58,13 @@ def _format_user_summary(user_data: dict) -> RegulationUserSummary:
     if not user_data:
         return RegulationUserSummary(id="anonymous", name="Membro da Comunidade")
     
+    is_ver = bool(user_data.get("email_verified") or user_data.get("phone_verified") or user_data.get("is_verified", False))
+
     # Atribuição de badges de reputação
     badge = None
     if user_data.get("is_admin"):
         badge = "Admin 🛡️"
-    elif user_data.get("is_verified"):
+    elif is_ver:
         badge = "Membro Verificado ⭐"
 
     return RegulationUserSummary(
@@ -70,7 +72,7 @@ def _format_user_summary(user_data: dict) -> RegulationUserSummary:
         name=user_data.get("name") or "Membro da Comunidade",
         avatar_url=user_data.get("avatar_url"),
         city=user_data.get("city") or "França",
-        is_verified=bool(user_data.get("is_verified", False)),
+        is_verified=is_ver,
         badge=badge,
     )
 
@@ -192,10 +194,49 @@ async def create_regulation_post(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Erro ao inserir post em regulation_posts: {e}")
+        logger.warning(f"Erro ao inserir post em regulation_posts: {e}. Tentando fallback em charity_ads...")
+        try:
+            meta_json = json.dumps({
+                "type": payload.type if payload.type in ["question", "tip"] else "question",
+                "category": payload.category.strip() if payload.category else "vistos",
+                "images": images_clean,
+            })
+            tag_prefix = "[DICA]" if payload.type == "tip" else "[DUVIDA]"
+            charity_record = {
+                "user_id": user["id"],
+                "type": "other",
+                "title": f"{tag_prefix} {payload.title.strip()}"[:100],
+                "description": f"REGULATION_META:{meta_json}---DESC---{payload.content.strip()}",
+                "image_url": images_clean[0] if images_clean else None,
+                "city": user.get("city") or "França",
+                "status": initial_status,
+                "is_approved": user.get("is_admin", False),
+            }
+            res_c = await db.table(Tables.CHARITY_ADS).insert(charity_record).execute()
+            if res_c.data:
+                c_item = res_c.data[0]
+                formatted_item = {
+                    "id": c_item.get("id"),
+                    "user_id": c_item.get("user_id"),
+                    "type": payload.type if payload.type in ["question", "tip"] else "question",
+                    "category": payload.category.strip() if payload.category else "vistos",
+                    "title": payload.title.strip(),
+                    "content": payload.content.strip(),
+                    "images": images_clean,
+                    "likes_count": 0,
+                    "replies_count": 0,
+                    "views_count": 0,
+                    "is_solved": False,
+                    "status": initial_status,
+                    "created_at": c_item.get("created_at"),
+                }
+                return _format_post(formatted_item, user_dict=user)
+        except Exception as e_c:
+            logger.error(f"Fallback charity_ads também falhou: {e_c}")
+
         raise HTTPException(
             status_code=500,
-            detail="Erro ao salvar publicação. Verifique se a tabela 'regulation_posts' foi criada no Supabase.",
+            detail="Erro ao salvar publicação. Por favor, tente novamente.",
         )
 
 
@@ -223,12 +264,16 @@ async def list_regulation_posts(
     elif raw_type in ["tip", "dica", "dicas"]:
         normalized_type = "tip"
 
+    raw_items = []
+    total_count = 0
+
+    # 1. Tentativa com JOIN users
     try:
-        query = db.table(Tables.REGULATION_POSTS).select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)")
-        query = query.in_("status", ["approved", "active"])
+        query = db.table(Tables.REGULATION_POSTS).select("*, users:user_id(id, name, avatar_url, city, email_verified, phone_verified, is_admin)", count="exact")
+        query = query.or_("status.eq.approved,status.eq.active,status.is.null")
 
         if normalized_type:
-            query = query.eq("type", normalized_type)
+            query = query.or_(f"type.eq.{normalized_type},type.ilike.%{raw_type}%")
 
         if category and category.lower() != "todas" and category.lower() != "all":
             query = query.eq("category", category)
@@ -245,48 +290,150 @@ async def list_regulation_posts(
         else:
             query = query.order("created_at", desc=True)
 
-        # Paginação
         offset = (page - 1) * page_size
         query = query.range(offset, offset + page_size - 1)
 
         res = await query.execute()
         raw_items = res.data or []
+        total_count = res.count if res.count is not None else len(raw_items)
+    except Exception as e_join:
+        logger.warning(f"Erro no select com join em regulation_posts: {e_join}. Tentando select simples...")
+        try:
+            query = db.table(Tables.REGULATION_POSTS).select("*", count="exact")
+            query = query.or_("status.eq.approved,status.eq.active,status.is.null")
 
-        # Identifica curtidas do visitante se autenticado
-        liked_post_ids = set()
-        if visitor and raw_items:
-            try:
-                post_ids = [str(x["id"]) for x in raw_items]
-                res_likes = (
-                    await db.table(Tables.REGULATION_LIKES)
-                    .select("target_id")
-                    .eq("user_id", visitor["id"])
-                    .eq("target_type", "post")
-                    .in_("target_id", post_ids)
-                    .execute()
-                )
-                liked_post_ids = {str(lk["target_id"]) for lk in (res_likes.data or [])}
-            except Exception:
-                pass
+            if normalized_type:
+                query = query.or_(f"type.eq.{normalized_type},type.ilike.%{raw_type}%")
 
-        formatted = [
-            _format_post(
-                item=it,
-                user_dict=it.get("users"),
-                has_liked=str(it.get("id")) in liked_post_ids,
-            )
-            for it in raw_items
-        ]
+            if category and category.lower() != "todas" and category.lower() != "all":
+                query = query.eq("category", category)
 
-        return RegulationPostListResponse(
-            total=len(formatted),
-            page=page,
-            page_size=page_size,
-            items=formatted,
+            if search_term:
+                query = query.or_(f"title.ilike.%{search_term}%,content.ilike.%{search_term}%")
+
+            if sort == "likes":
+                query = query.order("likes_count", desc=True)
+            elif sort == "replies":
+                query = query.order("replies_count", desc=True)
+            elif sort == "unsolved":
+                query = query.eq("is_solved", False).order("created_at", desc=True)
+            else:
+                query = query.order("created_at", desc=True)
+
+            offset = (page - 1) * page_size
+            query = query.range(offset, offset + page_size - 1)
+
+            res = await query.execute()
+            raw_items = res.data or []
+            total_count = res.count if res.count is not None else len(raw_items)
+        except Exception as e_simple:
+            logger.error(f"Erro ao buscar posts de regulation_posts: {e_simple}")
+            raw_items = []
+
+    # 2. Fallback em CHARITY_ADS se houver posts de regularização salvos em charity_ads
+    try:
+        res_c = (
+            await db.table(Tables.CHARITY_ADS)
+            .select("*")
+            .or_("description.ilike.%REGULATION_META:%,title.ilike.%[DUVIDA]%,title.ilike.%[DICA]%")
+            .or_("status.eq.approved,status.eq.active,is_approved.eq.true")
+            .order("created_at", desc=True)
+            .execute()
         )
-    except Exception as e:
-        logger.error(f"Erro ao buscar posts de regulation_posts: {e}")
-        return RegulationPostListResponse(total=0, page=page, page_size=page_size, items=[])
+        if res_c.data:
+            existing_ids = {str(x.get("id")) for x in raw_items}
+            for c_item in res_c.data:
+                if str(c_item.get("id")) not in existing_ids:
+                    desc = c_item.get("description") or ""
+                    real_type = "question"
+                    real_cat = "vistos"
+                    real_desc = desc
+                    images = []
+                    if "REGULATION_META:" in desc and "---DESC---" in desc:
+                        parts = desc.split("---DESC---")
+                        meta_str = parts[0].replace("REGULATION_META:", "").strip()
+                        try:
+                            m_obj = json.loads(meta_str)
+                            real_type = m_obj.get("type") or "question"
+                            real_cat = m_obj.get("category") or "vistos"
+                            images = m_obj.get("images") or []
+                        except Exception:
+                            pass
+                        real_desc = parts[1].strip() if len(parts) > 1 else desc
+                    elif "[DICA]" in (c_item.get("title") or ""):
+                        real_type = "tip"
+                    elif "[DUVIDA]" in (c_item.get("title") or "") or "[QUESTION]" in (c_item.get("title") or ""):
+                        real_type = "question"
+
+                    if normalized_type and real_type != normalized_type:
+                        continue
+                    if category and category.lower() not in ["todas", "all"] and real_cat != category:
+                        continue
+                    title = (c_item.get("title") or "").replace("[QUESTION]", "").replace("[TIP]", "").replace("[DUVIDA]", "").replace("[DICA]", "").strip()
+                    if search_term and (search_term not in title.lower() and search_term not in real_desc.lower()):
+                        continue
+
+                    raw_items.append({
+                        "id": c_item.get("id"),
+                        "user_id": c_item.get("user_id"),
+                        "type": real_type,
+                        "category": real_cat,
+                        "title": title,
+                        "content": real_desc,
+                        "images": images or ([c_item.get("image_url")] if c_item.get("image_url") else []),
+                        "likes_count": 0,
+                        "replies_count": 0,
+                        "is_solved": False,
+                        "status": c_item.get("status") or "approved",
+                        "created_at": c_item.get("created_at"),
+                    })
+                    total_count += 1
+    except Exception as e_c:
+        logger.debug(f"Verificação de fallback charity_ads em listagem: {e_c}")
+
+    # Identifica usuários que faltam para buscar detalhes
+    user_ids_to_fetch = [str(x.get("user_id")) for x in raw_items if x.get("user_id") and not x.get("users")]
+    user_map = {}
+    if user_ids_to_fetch:
+        try:
+            res_users = await db.table(Tables.USERS).select("id, name, avatar_url, city, email_verified, phone_verified, is_admin").in_("id", list(set(user_ids_to_fetch))).execute()
+            for u in (res_users.data or []):
+                user_map[str(u.get("id"))] = u
+        except Exception as e_u:
+            logger.debug(f"Erro ao buscar usuarios do post: {e_u}")
+
+    # Identifica curtidas do visitante se autenticado
+    liked_post_ids = set()
+    if visitor and raw_items:
+        try:
+            post_ids = [str(x["id"]) for x in raw_items]
+            res_likes = (
+                await db.table(Tables.REGULATION_LIKES)
+                .select("target_id")
+                .eq("user_id", visitor["id"])
+                .eq("target_type", "post")
+                .in_("target_id", post_ids)
+                .execute()
+            )
+            liked_post_ids = {str(lk["target_id"]) for lk in (res_likes.data or [])}
+        except Exception:
+            pass
+
+    formatted = [
+        _format_post(
+            item=it,
+            user_dict=it.get("users") or user_map.get(str(it.get("user_id"))),
+            has_liked=str(it.get("id")) in liked_post_ids,
+        )
+        for it in raw_items
+    ]
+
+    return RegulationPostListResponse(
+        total=total_count if total_count > 0 else len(formatted),
+        page=page,
+        page_size=page_size,
+        items=formatted,
+    )
 
 
 @router.get("/posts/mine", response_model=List[RegulationPostResponse])
@@ -295,19 +442,83 @@ async def list_my_regulation_posts(
     db: AsyncClient = Depends(get_db),
 ):
     """Lista todas as publicações criadas pelo usuário logado."""
+    raw_mine = []
     try:
         res = (
             await db.table(Tables.REGULATION_POSTS)
-            .select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)")
+            .select("*, users:user_id(id, name, avatar_url, city, email_verified, phone_verified, is_admin)")
             .eq("user_id", user["id"])
             .neq("status", "deleted")
             .order("created_at", desc=True)
             .execute()
         )
-        return [_format_post(it, user_dict=user) for it in (res.data or [])]
-    except Exception as e:
-        logger.error(f"Erro ao buscar regulation posts do usuário: {e}")
-        return []
+        raw_mine = res.data or []
+    except Exception as e_join:
+        logger.warning(f"Erro no select join em list_my_regulation_posts: {e_join}")
+        try:
+            res_simple = (
+                await db.table(Tables.REGULATION_POSTS)
+                .select("*")
+                .eq("user_id", user["id"])
+                .neq("status", "deleted")
+                .order("created_at", desc=True)
+                .execute()
+            )
+            raw_mine = res_simple.data or []
+        except Exception as e_simple:
+            logger.error(f"Erro ao buscar regulation posts do usuário: {e_simple}")
+            raw_mine = []
+
+    # Fallback charity_ads para os posts do usuário
+    try:
+        res_c = (
+            await db.table(Tables.CHARITY_ADS)
+            .select("*")
+            .eq("user_id", user["id"])
+            .ilike("description", "%REGULATION_META:%")
+            .neq("status", "deleted")
+            .order("created_at", desc=True)
+            .execute()
+        )
+        if res_c.data:
+            existing_ids = {str(x.get("id")) for x in raw_mine}
+            for c_item in res_c.data:
+                if str(c_item.get("id")) not in existing_ids:
+                    desc = c_item.get("description") or ""
+                    real_type = "question"
+                    real_cat = "vistos"
+                    real_desc = desc
+                    images = []
+                    if "REGULATION_META:" in desc and "---DESC---" in desc:
+                        parts = desc.split("---DESC---")
+                        meta_str = parts[0].replace("REGULATION_META:", "").strip()
+                        try:
+                            m_obj = json.loads(meta_str)
+                            real_type = m_obj.get("type") or "question"
+                            real_cat = m_obj.get("category") or "vistos"
+                            images = m_obj.get("images") or []
+                        except Exception:
+                            pass
+                        real_desc = parts[1].strip() if len(parts) > 1 else desc
+                    title = (c_item.get("title") or "").replace("[QUESTION]", "").replace("[TIP]", "").replace("[DUVIDA]", "").replace("[DICA]", "").strip()
+                    raw_mine.append({
+                        "id": c_item.get("id"),
+                        "user_id": c_item.get("user_id"),
+                        "type": real_type,
+                        "category": real_cat,
+                        "title": title,
+                        "content": real_desc,
+                        "images": images or ([c_item.get("image_url")] if c_item.get("image_url") else []),
+                        "likes_count": 0,
+                        "replies_count": 0,
+                        "is_solved": False,
+                        "status": c_item.get("status") or "pending",
+                        "created_at": c_item.get("created_at"),
+                    })
+    except Exception:
+        pass
+
+    return [_format_post(it, user_dict=user) for it in raw_mine]
 
 
 @router.get("/posts/{post_id}", response_model=RegulationPostResponse)
@@ -321,7 +532,7 @@ async def get_regulation_post_detail(
     try:
         res = (
             await db.table(Tables.REGULATION_POSTS)
-            .select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)")
+            .select("*, users:user_id(id, name, avatar_url, city, email_verified, phone_verified, is_admin)")
             .eq("id", post_id)
             .limit(1)
             .execute()
@@ -342,7 +553,7 @@ async def get_regulation_post_detail(
         try:
             res_c = await db.table(Tables.CHARITY_ADS).select("*").eq("id", post_id).limit(1).execute()
             if not res_c.data:
-                res_c = await db.table(Tables.CHARITY_ADS).select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)").eq("id", post_id).limit(1).execute()
+                res_c = await db.table(Tables.CHARITY_ADS).select("*, users:user_id(id, name, avatar_url, city, email_verified, phone_verified, is_admin)").eq("id", post_id).limit(1).execute()
             if res_c.data:
                 c_item = res_c.data[0]
                 desc = c_item.get("description") or ""
@@ -424,7 +635,7 @@ async def get_regulation_post_detail(
     try:
         res_rep = (
             await db.table(Tables.REGULATION_REPLIES)
-            .select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)")
+            .select("*, users:user_id(id, name, avatar_url, city, email_verified, phone_verified, is_admin)")
             .eq("post_id", post_id)
             .neq("status", "deleted")
             .order("is_best_answer", desc=True)
@@ -434,7 +645,21 @@ async def get_regulation_post_detail(
         )
         replies_raw = res_rep.data or []
     except Exception as e:
-        logger.error(f"Erro ao buscar respostas: {e}")
+        logger.warning(f"Tentativa 1 select regulation_replies com join falhou: {e}")
+        try:
+            res_simple = (
+                await db.table(Tables.REGULATION_REPLIES)
+                .select("*")
+                .eq("post_id", post_id)
+                .neq("status", "deleted")
+                .order("is_best_answer", desc=True)
+                .order("likes_count", desc=True)
+                .order("created_at", desc=False)
+                .execute()
+            )
+            replies_raw = res_simple.data or []
+        except Exception as e2:
+            logger.error(f"Erro ao buscar respostas regulation_replies: {e2}")
 
     # Verifica curtidas nas respostas
     liked_reply_ids = set()
@@ -760,7 +985,7 @@ async def list_regulation_replies(
     try:
         res = (
             await db.table(Tables.REGULATION_REPLIES)
-            .select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)")
+            .select("*, users:user_id(id, name, avatar_url, city, email_verified, phone_verified, is_admin)")
             .eq("post_id", post_id)
             .neq("status", "deleted")
             .order("is_best_answer", desc=True)
@@ -770,7 +995,21 @@ async def list_regulation_replies(
         )
         raw = res.data or []
     except Exception as e:
-        logger.error(f"Erro ao listar respostas de regulation_replies: {e}")
+        logger.warning(f"Tentativa 1 list_regulation_replies com join falhou: {e}")
+        try:
+            res_simple = (
+                await db.table(Tables.REGULATION_REPLIES)
+                .select("*")
+                .eq("post_id", post_id)
+                .neq("status", "deleted")
+                .order("is_best_answer", desc=True)
+                .order("likes_count", desc=True)
+                .order("created_at", desc=False)
+                .execute()
+            )
+            raw = res_simple.data or []
+        except Exception as e2:
+            logger.error(f"Erro ao listar respostas de regulation_replies: {e2}")
 
     liked_ids = set()
     if visitor and raw:
@@ -965,7 +1204,7 @@ async def list_regulation_reports_admin(
         raise HTTPException(status_code=403, detail="Acesso restrito a administradores.")
 
     try:
-        query = db.table(Tables.REGULATION_REPORTS).select("*, users:user_id(id, name, avatar_url, city, is_verified, is_admin)")
+        query = db.table(Tables.REGULATION_REPORTS).select("*, users:user_id(id, name, avatar_url, city, email_verified, phone_verified, is_admin)")
         if status_filter:
             query = query.eq("status", status_filter)
         query = query.order("created_at", desc=True)

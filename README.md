@@ -187,17 +187,7 @@ alter table charity_ads
   add column if not exists status text default 'pending',
   add column if not exists created_at timestamptz default now();
 
--- GIFT_CODES
-alter table gift_codes
-  add column if not exists type text default 'highlight',
-  add column if not exists max_uses int default 1,
-  add column if not exists uses_count int default 0,
-  add column if not exists used_by uuid[] default '{}',
-  add column if not exists used_at timestamptz,
-  add column if not exists active boolean default true,
-  add column if not exists expires_at timestamptz,
-  add column if not exists created_by uuid,
-  add column if not exists created_at timestamptz default now();
+
 
 -- REPORTS
 alter table reports

@@ -14,7 +14,6 @@ class Tables:
     TOURISM_SPOTS = "tourism_spots"
     PET_POSTS = "pet_posts"
     ITEM_COMMENTS = "item_comments"
-    GIFT_CODES = "gift_codes"
     REPORTS = "reports"
     PAYMENTS = "payments"
     MONTHLY_RANKING = "monthly_ranking"
@@ -88,11 +87,6 @@ class ReportTargetType(str, Enum):
     URGENT_AD = "urgent_ad"
     CHARITY_AD = "charity_ad"
     USER = "user"
-
-
-class GiftCodeType(str, Enum):
-    HIGHLIGHT = "highlight"   # destaque grátis
-    REFERRAL = "referral"     # indicação de anunciante
 
 
 class PaymentStatus(str, Enum):
