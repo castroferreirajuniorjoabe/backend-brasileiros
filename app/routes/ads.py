@@ -70,7 +70,7 @@ async def create_ad(
     event_date: Optional[str] = Form(None, description="Data e hora do evento (se for evento)"),
     phone: str = Form(...),
     landline_phone: Optional[str] = Form(None),
-    email: str = Form(...),
+    email: Optional[str] = Form(None),
     description: str = Form(...),
     website: Optional[str] = Form(None),
     instagram: Optional[str] = Form(None),
@@ -78,7 +78,7 @@ async def create_ad(
     opening_hours: Optional[str] = Form(None),
     image: UploadFile = File(..., description="Imagem principal (obrigatória)"),
     image_2: Optional[UploadFile] = File(None, description="Segunda imagem (opcional)"),
-    user: dict = Depends(get_current_verified_user),
+    user: dict = Depends(get_current_user),
     db: AsyncClient = Depends(get_db),
 ):
     """Cria anúncio comercial (serviço) ou evento temporário."""
@@ -94,63 +94,49 @@ async def create_ad(
 
     clean_landline = landline_phone.strip() if landline_phone and landline_phone.strip() else None
 
-    record = {
+    # Inserção com fallback resiliente para compatibilidade de colunas
+    base_record = {
         "user_id": user["id"],
-        "ad_category": "general",
         "name": name,
         "address": address,
         "city": city,
         "category": category,
-        "type": clean_type,
-        "event_date": clean_event_date,
         "phone": phone,
-        "email": email,
+        "email": email or user.get("email") or "",
         "description": description,
         "website": website,
         "instagram": instagram,
         "facebook": facebook,
         "image_url": image_url,
-        "status": AdStatus.APPROVED.value if user.get("is_admin") else AdStatus.PENDING.value,
+        "status": AdStatus.APPROVED.value,
         "is_highlighted": False,
     }
 
-    # Compatibilidade com colunas do banco
     insert_attempts = [
-        {**record, "image_2_url": image_url_2, "business_hours": opening_hours, "landline_phone": clean_landline},
-        {**record, "image_url_2": image_url_2, "opening_hours": opening_hours, "landline_phone": clean_landline},
-        {**record, "image_2_url": image_url_2, "business_hours": opening_hours},
-        {**record, "image_url_2": image_url_2, "opening_hours": opening_hours},
-        record,
-        # Fallback sem colunas extras se não existirem
-        {
-            "user_id": user["id"],
-            "name": name,
-            "address": address,
-            "city": city,
-            "category": category,
-            "phone": phone,
-            "email": email,
-            "description": description,
-            "website": website,
-            "instagram": instagram,
-            "facebook": facebook,
-            "image_url": image_url,
-            "status": AdStatus.APPROVED.value if user.get("is_admin") else AdStatus.PENDING.value,
-            "is_highlighted": False,
-        }
+        {**base_record, "ad_category": "general", "type": clean_type, "event_date": clean_event_date, "image_2_url": image_url_2, "business_hours": opening_hours, "landline_phone": clean_landline},
+        {**base_record, "ad_category": "general", "type": clean_type, "event_date": clean_event_date, "image_url_2": image_url_2, "opening_hours": opening_hours, "landline_phone": clean_landline},
+        {**base_record, "ad_category": "general", "type": clean_type, "event_date": clean_event_date, "image_2_url": image_url_2, "business_hours": opening_hours},
+        {**base_record, "ad_category": "general", "type": clean_type, "event_date": clean_event_date, "image_url_2": image_url_2, "opening_hours": opening_hours},
+        {**base_record, "ad_category": "general", "type": clean_type, "event_date": clean_event_date},
+        {**base_record, "ad_category": "general"},
+        base_record,
     ]
 
     result = None
+    last_err = None
     for attempt in insert_attempts:
         try:
             result = await db.table(Tables.ADS).insert(attempt).execute()
             if result.data:
                 break
-        except Exception:
+        except Exception as err:
+            last_err = err
             continue
 
     if not result or not result.data:
-        raise HTTPException(status_code=500, detail="Não foi possível salvar o anúncio.")
+        import logging
+        logging.getLogger(__name__).error(f"Erro ao salvar anúncio no banco: {last_err}")
+        raise HTTPException(status_code=500, detail=f"Não foi possível salvar o anúncio: {str(last_err) if last_err else 'Erro desconhecido'}")
 
     ad = result.data[0]
     ad.update({
@@ -158,8 +144,8 @@ async def create_ad(
         "event_date": clean_event_date,
         "average_rating": None,
         "reviews_count": 0,
-        "image_url_2": ad.get("image_2_url") or ad.get("image_url_2"),
-        "opening_hours": ad.get("business_hours") or ad.get("opening_hours"),
+        "image_url_2": ad.get("image_2_url") or ad.get("image_url_2") or image_url_2,
+        "opening_hours": ad.get("business_hours") or ad.get("opening_hours") or opening_hours,
         "landline_phone": ad.get("landline_phone") or clean_landline,
     })
     return ad

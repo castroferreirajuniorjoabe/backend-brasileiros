@@ -34,7 +34,7 @@ class AdResponse(BaseModel):
     event_date: str | None = None
     phone: str
     landline_phone: str | None = None
-    email: str
+    email: str | None = None
     description: str
     image_url: str
     website: str | None = None

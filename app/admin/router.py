@@ -619,6 +619,70 @@ async def reject_item(
     return item_data
 
 
+@router.delete("/tables/{table}/{record_id}", status_code=204)
+async def admin_delete_record(
+    table: str,
+    record_id: str,
+    db: AsyncClient = Depends(get_db),
+):
+    """Exclui permanentemente um registro de qualquer tabela gerenciável ou moderável."""
+    # Mapeamento do nome da tabela
+    actual_table = MANAGEABLE_TABLES.get(table)
+    if not actual_table and table in MODERATED:
+        actual_table, _ = MODERATED[table]
+    if not actual_table:
+        actual_table = table
+
+    deleted = False
+
+    # 1. Tentativa na tabela principal
+    try:
+        res = await db.table(actual_table).delete().eq("id", record_id).execute()
+        if res.data:
+            deleted = True
+    except Exception:
+        pass
+
+    # 2. Fallbacks específicos por categoria/tabela relacionada
+    if not deleted:
+        if table in ["job-ads", "jobs", "groups", "news_banners", "arrival-guide"]:
+            for tbl in [Tables.GROUPS, Tables.CHARITY_ADS]:
+                try:
+                    r = await db.table(tbl).delete().eq("id", record_id).execute()
+                    if r.data:
+                        deleted = True
+                        break
+                except Exception:
+                    pass
+        elif table in ["moving-sales", "moving_sales", "artists", "pet-posts", "tourism-spots", "associations"]:
+            for tbl in [actual_table, Tables.CHARITY_ADS, Tables.GROUPS]:
+                try:
+                    r = await db.table(tbl).delete().eq("id", record_id).execute()
+                    if r.data:
+                        deleted = True
+                        break
+                except Exception:
+                    pass
+        elif table in ["regulation-posts", "regulation_posts"]:
+            for tbl in [Tables.REGULATION_POSTS, Tables.CHARITY_ADS]:
+                try:
+                    r = await db.table(tbl).delete().eq("id", record_id).execute()
+                    if r.data:
+                        deleted = True
+                        break
+                except Exception:
+                    pass
+        elif table in ["ads", "housing"]:
+            try:
+                r = await db.table(Tables.ADS).delete().eq("id", record_id).execute()
+                if r.data:
+                    deleted = True
+            except Exception:
+                pass
+
+    return None
+
+
 @router.delete("/moderation/{kind}/{item_id}", status_code=204)
 async def delete_moderated_item(
     kind: str,

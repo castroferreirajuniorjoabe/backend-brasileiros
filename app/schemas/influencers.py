@@ -21,7 +21,7 @@ class InfluencerCreate(BaseModel):
     partnership_types: Optional[List[str]] = []
     average_price: Optional[str] = None
     whatsapp: Optional[str] = None
-    email: str
+    email: Optional[str] = None
     website: Optional[str] = None
     profile_image: str
     banner_image: Optional[str] = None
@@ -67,7 +67,7 @@ class InfluencerResponse(BaseModel):
     partnership_types: Optional[List[str]] = []
     average_price: Optional[str] = None
     whatsapp: Optional[str] = None
-    email: str
+    email: Optional[str] = None
     website: Optional[str] = None
     is_verified: bool = False
     is_featured: bool = False

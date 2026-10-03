@@ -287,11 +287,18 @@ async def google_auth(payload: GoogleOAuthRequest, db: AsyncClient = Depends(get
             if user.get("is_blocked"):
                 raise HTTPException(status_code=403, detail="Usuário bloqueado pelo administrador.")
             
-            # Atualiza avatar se não tiver
+            # Garante que usuário que entra via Google tenha email_verified=True
+            update_fields = {}
+            if not user.get("email_verified"):
+                update_fields["email_verified"] = True
+                user["email_verified"] = True
             if avatar_url and not user.get("avatar_url"):
+                update_fields["avatar_url"] = avatar_url
+                user["avatar_url"] = avatar_url
+
+            if update_fields:
                 try:
-                    await db.table(Tables.USERS).update({"avatar_url": avatar_url}).eq("id", user["id"]).execute()
-                    user["avatar_url"] = avatar_url
+                    await db.table(Tables.USERS).update(update_fields).eq("id", user["id"]).execute()
                 except Exception:
                     pass
         else:
@@ -306,7 +313,7 @@ async def google_auth(payload: GoogleOAuthRequest, db: AsyncClient = Depends(get
                 "city": "Paris",
                 "password_hash": hash_password(generate_verification_token()),
                 "email_verified": True,
-                "phone_verified": False,
+                "phone_verified": True,
                 "is_admin": False,
                 "is_blocked": False,
                 "avatar_url": avatar_url,

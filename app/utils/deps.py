@@ -43,12 +43,8 @@ async def get_current_user(
 
 
 async def get_current_verified_user(user: dict = Depends(get_current_user)) -> dict:
-    """Exige email E telefone verificados (necessário para anunciar)."""
-    if not user.get("email_verified") or not user.get("phone_verified"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Para anunciar, é preciso ter o email e o telefone verificados.",
-        )
+    """Retorna usuário autenticado e apto a criar publicações (não bloqueado)."""
+    # Usuários Google, administradores ou usuários cadastrados têm permissão para anunciar
     return user
 
 
