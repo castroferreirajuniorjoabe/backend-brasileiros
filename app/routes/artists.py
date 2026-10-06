@@ -199,7 +199,7 @@ async def create_artist_profile(
     clean_bio = payload.bio.strip()
     clean_city = (payload.city or "Paris").strip()
     clean_phone = (payload.phone or user.get("phone") or "").strip()
-    clean_email = (payload.email or user.get("email") or "").strip()
+    clean_email = payload.email.strip() if payload.email and payload.email.strip() else None
     clean_whatsapp = (payload.whatsapp or clean_phone or "").strip()
 
     # Tentativa 1: Inserção na tabela dedicada `artists`
