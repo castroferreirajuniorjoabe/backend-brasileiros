@@ -27,6 +27,7 @@ def _format_urgent_ad(ad: dict) -> dict:
     a["city"] = a.get("location") or a.get("city") or "França"
     a["image_url"] = a.get("photo_url") or a.get("image_url")
     desc = a.get("description") or ""
+    title = a.get("title") or ""
     phone = a.get("contact_phone") or a.get("phone") or ""
     if not phone and "[Contato Direto:" in desc:
         try:
@@ -35,7 +36,19 @@ def _format_urgent_ad(ad: dict) -> dict:
             pass
     a["contact_phone"] = phone
     a["phone"] = phone
-    a["badge"] = "URGENTE"
+
+    badge = "URGENTE"
+    if "[RESOLVIDO:" in desc:
+        try:
+            badge = desc.split("[RESOLVIDO:")[1].split("]")[0].strip()
+        except Exception:
+            badge = "RESOLVIDO"
+    elif "ENCONTRADO" in title.upper() or "LOCALIZADO" in title.upper():
+        badge = "ENCONTRADO"
+    elif "RESOLVIDO" in title.upper() or "SOLUCIONADO" in title.upper():
+        badge = "RESOLVIDO"
+
+    a["badge"] = badge
     return a
 
 
@@ -157,7 +170,43 @@ async def get_urgent_ad(
     )
     if not result.data:
         raise HTTPException(status_code=404, detail="Anúncio de urgência não encontrado.")
-    return result.data[0]
+    return _format_urgent_ad(result.data[0])
+
+
+@router.patch("/{urgent_ad_id}/resolve")
+async def resolve_urgent_ad(
+    urgent_ad_id: str,
+    payload: dict,
+    user: dict = Depends(get_current_user),
+    db: AsyncClient = Depends(get_db),
+):
+    """Permite ao anunciante ou admin marcar a ocorrência como Resolvida/Encontrada."""
+    result = (
+        await db.table(Tables.URGENT_ADS)
+        .select("*")
+        .eq("id", urgent_ad_id)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Anúncio de urgência não encontrado.")
+    ad = result.data[0]
+    if ad["user_id"] != user["id"] and not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+
+    resolution_type = payload.get("resolution_type", "RESOLVIDO").strip().upper()
+    current_desc = ad.get("description") or ""
+    # Remove marcações anteriores de resolvido se houver
+    clean_lines = [l for l in current_desc.split("\n") if not l.startswith("[RESOLVIDO:")]
+    new_desc = "\n".join(clean_lines).strip() + f"\n[RESOLVIDO: {resolution_type}]"
+
+    updated = (
+        await db.table(Tables.URGENT_ADS)
+        .update({"description": new_desc})
+        .eq("id", urgent_ad_id)
+        .execute()
+    )
+    return _format_urgent_ad(updated.data[0] if updated.data else {**ad, "description": new_desc})
 
 
 @router.delete("/{urgent_ad_id}", status_code=204)

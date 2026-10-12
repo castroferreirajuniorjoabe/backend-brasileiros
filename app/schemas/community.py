@@ -37,8 +37,8 @@ class UrgentAdResponse(BaseModel):
     type: str
     title: str
     description: str
-    city: str
-    contact_phone: str
+    city: str | None = ""
+    contact_phone: str | None = ""
     image_url: str | None = None
     document_url: str | None = None
     badge: str = "URGENTE"
