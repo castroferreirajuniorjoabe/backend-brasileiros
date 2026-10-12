@@ -94,7 +94,7 @@ async def create_ad(
 
     clean_landline = landline_phone.strip() if landline_phone and landline_phone.strip() else None
 
-    clean_email = email.strip() if email and email.strip() else None
+    clean_email = email.strip() if email and email.strip() else ""
 
     # Inserção com fallback resiliente para compatibilidade de colunas
     base_record = {
@@ -104,7 +104,7 @@ async def create_ad(
         "city": city,
         "category": category,
         "phone": phone,
-        "email": clean_email,
+        "email": clean_email,  # string vazia evita NOT NULL violation
         "description": description,
         "website": website,
         "instagram": instagram,
