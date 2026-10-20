@@ -29,6 +29,12 @@ class ReportCreateRequest(BaseModel):
     reason: str = Field(min_length=5, max_length=1000)
 
 
+class IdeaCreateRequest(BaseModel):
+    theme: str = Field(default="Descoberta", max_length=100)
+    suggestion: str = Field(min_length=3, max_length=1000)
+    contact_email: str | None = Field(default=None, max_length=255)
+
+
 class ReportResolveRequest(BaseModel):
     resolution: str = Field(default="resolved", pattern="^(resolved|dismissed)$")
     note: str | None = Field(default=None, max_length=1000)
@@ -36,10 +42,11 @@ class ReportResolveRequest(BaseModel):
 
 class ReportResponse(BaseModel):
     id: str
-    reporter_id: str
-    target_type: str
-    target_id: str
+    reporter_id: str | None = None
+    target_type: str | None = None
+    target_id: str | None = None
     reason: str
+    description: str | None = None
     status: str
     resolution_note: str | None = None
     created_at: str | None = None

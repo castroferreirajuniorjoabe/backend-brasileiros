@@ -142,6 +142,9 @@ class JobAdResponse(BaseModel):
     badge: str = "EMPREGO"
     status: str
     created_at: str | None = None
+    original_title: str | None = None
+    original_description: str | None = None
+    translated_lang: str | None = None
 
 
 # ---------- Carrossel "Novidades Chegando" & Patrocínios (Admin Only) ----------

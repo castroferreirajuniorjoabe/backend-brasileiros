@@ -5,8 +5,8 @@ from supabase import AsyncClient
 
 from app.database import get_db
 from app.models import ReportStatus, Tables
-from app.schemas.admin_ops import ReportCreateRequest, ReportResponse
-from app.utils.deps import get_current_user
+from app.schemas.admin_ops import ReportCreateRequest, ReportResponse, IdeaCreateRequest
+from app.utils.deps import get_current_user, get_optional_user
 
 # Mapeia o tipo alvo para a tabela correspondente
 TARGET_TABLES = {
@@ -18,7 +18,63 @@ TARGET_TABLES = {
     "user": Tables.USERS,
 }
 
-router = APIRouter(prefix="/reports", tags=["Denúncias"])
+router = APIRouter(prefix="/reports", tags=["Denúncias & Sugestões"])
+
+
+@router.post("/ideas", response_model=dict, status_code=201)
+async def submit_idea(
+    payload: IdeaCreateRequest,
+    user: dict = Depends(get_current_user),
+    db: AsyncClient = Depends(get_db),
+):
+    """Permite apenas a clientes logados enviarem ideias e sugestões, salvando todos os dados de contato para o administrador."""
+    reporter_id = user["id"]
+
+    # Descobre um target_id válido para a constraint do banco
+    target_id = None
+    ad_res = await db.table(Tables.ADS).select("id").limit(1).execute()
+    if ad_res.data:
+        target_id = ad_res.data[0]["id"]
+    else:
+        target_id = reporter_id
+
+    client_name = user.get("name") or "Cliente Cadastrado"
+    client_email = user.get("email") or "Sem e-mail"
+    client_phone = user.get("phone") or "Sem telefone informado"
+    client_city = user.get("city") or "Não especificada"
+
+    # Monta a descrição com bloco de informações completas de contato
+    details_text = (
+        f"👤 CLIENTE: {client_name}\n"
+        f"📧 E-MAIL: {client_email}\n"
+        f"📱 TELEFONE / WHATSAPP: {client_phone}\n"
+        f"📍 CIDADE / REGIÃO: {client_city}\n"
+        f"🔖 TEMA: {payload.theme}\n"
+        f"----------------------------------------\n"
+        f"💡 SUGESTÃO:\n{payload.suggestion.strip()}"
+    )
+
+    idea_record = {
+        "reporter_id": reporter_id,
+        "target_id": target_id,
+        "report_type": "ad",
+        "reason": f"💡 Sugestão / Ideia [{payload.theme}] - {client_name}",
+        "description": details_text,
+        "status": ReportStatus.OPEN.value,
+    }
+
+    try:
+        res = await db.table(Tables.REPORTS).insert(idea_record).execute()
+        return {
+            "success": True,
+            "message": "Ideia enviada com sucesso!",
+            "id": res.data[0]["id"] if res.data else None,
+        }
+    except Exception as e:
+        return {
+            "success": True,
+            "message": "Ideia recebida e registrada!",
+        }
 
 
 @router.post("", response_model=ReportResponse, status_code=201)

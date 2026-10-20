@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models import ModerationStatus, Tables
 from app.schemas.community import JobAdResponse
 from app.utils.deps import get_current_user, get_optional_user
+from app.utils.translation import translate_job_fields
 
 router = APIRouter(prefix="/job-ads", tags=["Vagas & Empregos"])
 
@@ -130,10 +131,11 @@ async def list_job_ads(
     city: Optional[str] = Query(None),
     contract_type: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
+    lang: Optional[str] = Query(None, description="Idioma desejado para tradução automática (ex: pt, fr, en)"),
     db: AsyncClient = Depends(get_db),
     _visitor: dict | None = Depends(get_optional_user),
 ):
-    """Lista todas as vagas de emprego ativas com filtros por cidade, contrato e palavra-chave."""
+    """Lista todas as vagas de emprego ativas com filtros por cidade, contrato, palavra-chave e tradução para o idioma do usuário."""
     job_ads = []
 
     # Busca dos registros da tabela groups com prefixo job_ad:
@@ -167,6 +169,15 @@ async def list_job_ads(
                 and term not in job["city"].lower()
             ):
                 continue
+        
+        # Tradução automática se solicitado e diferente do original
+        if lang:
+            job = translate_job_fields(job, lang)
+        else:
+            job["original_title"] = job.get("title")
+            job["original_description"] = job.get("description")
+            job["translated_lang"] = "pt"
+
         filtered.append(job)
 
     return filtered
@@ -175,14 +186,22 @@ async def list_job_ads(
 @router.get("/{job_id}", response_model=JobAdResponse)
 async def get_job_ad(
     job_id: str,
+    lang: Optional[str] = Query(None, description="Idioma desejado para tradução (ex: pt, fr, en)"),
     db: AsyncClient = Depends(get_db),
     _visitor: dict | None = Depends(get_optional_user),
 ):
-    """Retorna detalhes de uma vaga específica."""
+    """Retorna detalhes de uma vaga específica com suporte a tradução de idioma."""
     try:
         res = await db.table(Tables.GROUPS).select("*").eq("id", job_id).limit(1).execute()
         if res.data:
-            return _format_job_ad(res.data[0])
+            formatted = _format_job_ad(res.data[0])
+            if lang:
+                formatted = translate_job_fields(formatted, lang)
+            else:
+                formatted["original_title"] = formatted.get("title")
+                formatted["original_description"] = formatted.get("description")
+                formatted["translated_lang"] = "pt"
+            return formatted
     except Exception:
         pass
 
