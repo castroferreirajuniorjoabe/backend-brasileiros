@@ -30,6 +30,7 @@ def _format_job_ad(record: dict) -> dict:
     landline_phone = record.get("landline_phone")
     status = record.get("status") or "approved"
     created_at = record.get("created_at")
+    image_url = record.get("logo_url") or record.get("image_url")
 
     # Se estiver empacotado no formato comunitário do grupo
     category = record.get("category") or ""
@@ -42,6 +43,8 @@ def _format_job_ad(record: dict) -> dict:
             whatsapp = meta.get("whatsapp", whatsapp)
             phone = meta.get("phone", phone)
             landline_phone = meta.get("landline_phone", landline_phone)
+            if not image_url and meta.get("image_url"):
+                image_url = meta.get("image_url")
         except Exception:
             pass
 
@@ -56,6 +59,7 @@ def _format_job_ad(record: dict) -> dict:
         "whatsapp": whatsapp,
         "phone": phone,
         "landline_phone": landline_phone,
+        "image_url": image_url,
         "badge": "EMPREGO",
         "status": status,
         "created_at": created_at,
@@ -150,6 +154,7 @@ async def list_job_ads(
             query = query.ilike("city", f"%{city}%")
         res = await query.order("created_at", desc=True).execute()
         for item in res.data or []:
+
             job_ads.append(_format_job_ad(item))
     except Exception:
         pass
