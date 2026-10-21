@@ -18,10 +18,15 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 dias
 
-    # Supabase
-    SUPABASE_URL: str
-    SUPABASE_ANON_KEY: str
-    SUPABASE_SERVICE_ROLE_KEY: str
+    # Supabase (Legado / transição)
+    SUPABASE_URL: str = ""
+    SUPABASE_ANON_KEY: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
+
+    # Firebase / GCP Cloud Run
+    FIREBASE_PROJECT_ID: str = "brasileiros-na-franca-b4d2f"
+    FIREBASE_SERVICE_ACCOUNT_JSON: str = ""
+    GOOGLE_APPLICATION_CREDENTIALS: str = ""
 
     # Stripe (destaque €2/semana)
     STRIPE_SECRET_KEY: str = ""
