@@ -30,8 +30,8 @@ def create_access_token(user_id: str, is_admin: bool = False) -> str:
         minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
     )
     payload = {
-        "sub": user_id,
-        "is_admin": is_admin,
+        "sub": str(user_id),
+        "is_admin": bool(is_admin),
         "exp": expire,
         "iat": datetime.now(timezone.utc),
     }

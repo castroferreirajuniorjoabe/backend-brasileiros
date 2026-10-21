@@ -35,18 +35,18 @@ router = APIRouter(prefix="/auth", tags=["Autenticação"])
 
 def _user_response(user: dict) -> UserResponse:
     return UserResponse(
-        id=user["id"],
+        id=str(user["id"]),
         name=user["name"],
         email=user["email"],
         phone=user["phone"],
         city=user["city"],
         avatar_url=user.get("avatar_url") or user.get("photo_url"),
-        email_verified=user.get("email_verified", False),
-        phone_verified=user.get("phone_verified", False),
-        is_admin=user.get("is_admin", False),
-        is_blocked=user.get("is_blocked", False),
+        email_verified=bool(user.get("email_verified", False)),
+        phone_verified=bool(user.get("phone_verified", False)),
+        is_admin=bool(user.get("is_admin", False)),
+        is_blocked=bool(user.get("is_blocked", False)),
         referral_code=user.get("referral_code"),
-        created_at=user.get("created_at"),
+        created_at=str(user.get("created_at")) if user.get("created_at") else None,
         user_type=user.get("user_type", "user"),
     )
 

@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
 
+    # PostgreSQL / Cloud SQL / Firebase
+    DATABASE_URL: str = "postgresql://postgres:BnfPassword2026!Secure@34.155.156.153:5432/brasileiros-na-franca-b4d2f-database"
+    DB_HOST: str = "34.155.156.153"
+    DB_PORT: int = 5432
+    DB_USER: str = "postgres"
+    DB_PASSWORD: str = "BnfPassword2026!Secure"
+    DB_NAME: str = "brasileiros-na-franca-b4d2f-database"
+
     # Firebase / GCP Cloud Run
     FIREBASE_PROJECT_ID: str = "brasileiros-na-franca-b4d2f"
     FIREBASE_SERVICE_ACCOUNT_JSON: str = ""

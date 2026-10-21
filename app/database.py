@@ -1,41 +1,219 @@
-"""Clientes assíncronos do Supabase.
+"""Adaptador de banco de dados nativo PostgreSQL (Cloud SQL) compatível com a API do Supabase client.
 
-- service client (service_role): bypassa RLS — usar em operações administrativas
-  e tudo o que o backend precisa garantir (o backend é a camada de autorização).
-- anon client: respeita RLS — disponível caso alguma operação precise respeitar
-  as políticas diretamente.
+Permite que todas as rotas do backend continuem funcionando de forma assíncrona
+(usando a sintaxe db.table(...).select(...).eq(...).execute()) conectando-se diretamente
+ao PostgreSQL gerenciado pelo Cloud SQL / Firebase Data Connect sem necessidade do Supabase.
 """
-from typing import Optional
 
-from supabase import AsyncClient, acreate_client
-
+from typing import Any, Dict, List, Optional
+import json
+import logging
+import asyncpg
 from app.config import settings
 
-_service_client: Optional[AsyncClient] = None
-_anon_client: Optional[AsyncClient] = None
+logger = logging.getLogger(__name__)
+
+_pool: Optional[asyncpg.Pool] = None
 
 
-async def get_service_db() -> AsyncClient:
-    """Cliente com service_role (acesso total — usar com cuidado)."""
-    global _service_client
-    if _service_client is None:
-        _service_client = await acreate_client(
-            settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY
-        )
-    return _service_client
+async def get_pool() -> asyncpg.Pool:
+    global _pool
+    if _pool is None:
+        try:
+            _pool = await asyncpg.create_pool(
+                dsn=settings.DATABASE_URL,
+                min_size=2,
+                max_size=10,
+                command_timeout=60,
+            )
+            logger.info("Pool de conexões PostgreSQL inicializado com sucesso.")
+        except Exception as e:
+            logger.error(f"Erro ao inicializar pool PostgreSQL: {e}")
+            raise e
+    return _pool
 
 
-async def get_anon_db() -> AsyncClient:
-    """Cliente com anon key (respeita RLS)."""
-    global _anon_client
-    if _anon_client is None:
-        _anon_client = await acreate_client(
-            settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY
-        )
-    return _anon_client
+class QueryResult:
+    def __init__(self, data: List[Dict[str, Any]], count: Optional[int] = None):
+        self.data = data
+        self.count = count if count is not None else len(data)
 
 
-# Dependência padrão das rotas: o backend controla a autorização via JWT próprio,
-# então usamos o service client e validamos permissões no código.
-async def get_db() -> AsyncClient:
+class TableQueryBuilder:
+    def __init__(self, pool: asyncpg.Pool, table_name: str):
+        self.pool = pool
+        self.table_name = table_name
+        self.op_type = "select"  # "select", "insert", "update", "delete"
+        self.select_columns = "*"
+        self.insert_data: Any = None
+        self.update_data: Dict[str, Any] = {}
+        self.where_clauses: List[str] = []
+        self.params: List[Any] = []
+        self.order_by_clause: Optional[str] = None
+        self.limit_val: Optional[int] = None
+        self.offset_val: Optional[int] = None
+
+    def select(self, columns: str = "*", count: Optional[str] = None):
+        self.op_type = "select"
+        self.select_columns = columns
+        return self
+
+    def insert(self, values: Any):
+        self.op_type = "insert"
+        self.insert_data = values
+        return self
+
+    def update(self, values: Dict[str, Any]):
+        self.op_type = "update"
+        self.update_data = values
+        return self
+
+    def delete(self):
+        self.op_type = "delete"
+        return self
+
+    def eq(self, column: str, value: Any):
+        self.params.append(value)
+        self.where_clauses.append(f'"{column}" = ${len(self.params)}')
+        return self
+
+    def neq(self, column: str, value: Any):
+        self.params.append(value)
+        self.where_clauses.append(f'"{column}" != ${len(self.params)}')
+        return self
+
+    def ilike(self, column: str, value: Any):
+        self.params.append(value)
+        self.where_clauses.append(f'"{column}" ILIKE ${len(self.params)}')
+        return self
+
+    def like(self, column: str, value: Any):
+        self.params.append(value)
+        self.where_clauses.append(f'"{column}" LIKE ${len(self.params)}')
+        return self
+
+    def or_(self, expr: str):
+        # Ex: "email.eq.foo,phone.eq.bar"
+        parts = expr.split(",")
+        sub_clauses = []
+        for part in parts:
+            if ".eq." in part:
+                col, val = part.split(".eq.", 1)
+                self.params.append(val)
+                sub_clauses.append(f'"{col}" = ${len(self.params)}')
+        if sub_clauses:
+            self.where_clauses.append(f"({' OR '.join(sub_clauses)})")
+        return self
+
+    def in_(self, column: str, values: List[Any]):
+        self.params.append(values)
+        self.where_clauses.append(f'"{column}" = ANY(${len(self.params)})')
+        return self
+
+    def order(self, column: str, desc: bool = False):
+        direction = "DESC" if desc else "ASC"
+        self.order_by_clause = f'"{column}" {direction}'
+        return self
+
+    def limit(self, count: int):
+        self.limit_val = count
+        return self
+
+    def offset(self, start: int):
+        self.offset_val = start
+        return self
+
+    async def execute(self) -> QueryResult:
+        async with self.pool.acquire() as conn:
+            where_sql = f" WHERE {' AND '.join(self.where_clauses)}" if self.where_clauses else ""
+
+            if self.op_type == "select":
+                order_sql = f" ORDER BY {self.order_by_clause}" if self.order_by_clause else ""
+                limit_sql = f" LIMIT {self.limit_val}" if self.limit_val is not None else ""
+                offset_sql = f" OFFSET {self.offset_val}" if self.offset_val is not None else ""
+                
+                cols = "*" if self.select_columns in ("*", None) else self.select_columns
+                sql = f'SELECT {cols} FROM "{self.table_name}"{where_sql}{order_sql}{limit_sql}{offset_sql};'
+                rows = await conn.fetch(sql, *self.params)
+                data = [dict(r) for r in rows]
+                return QueryResult(data)
+
+            elif self.op_type == "insert":
+                if isinstance(self.insert_data, list):
+                    records = self.insert_data
+                else:
+                    records = [self.insert_data]
+
+                inserted_data = []
+                for record in records:
+                    keys = list(record.keys())
+                    vals = [record[k] for k in keys]
+                    cols_str = ", ".join(f'"{k}"' for k in keys)
+                    placeholders = ", ".join(f"${i+1}" for i in range(len(vals)))
+                    sql = f'INSERT INTO "{self.table_name}" ({cols_str}) VALUES ({placeholders}) RETURNING *;'
+                    row = await conn.fetchrow(sql, *vals)
+                    if row:
+                        inserted_data.append(dict(row))
+                return QueryResult(inserted_data)
+
+            elif self.op_type == "update":
+                set_parts = []
+                exec_params = []
+                for k, v in self.update_data.items():
+                    exec_params.append(v)
+                    set_parts.append(f'"{k}" = ${len(exec_params)}')
+
+                where_parts = []
+                for clause in self.where_clauses:
+                    # Se houver placeholders ${i} na cláusula WHERE, ajusta pelo offset de exec_params
+                    where_parts.append(clause)
+                for val in self.params:
+                    exec_params.append(val)
+
+                # Reindexa os placeholders no WHERE para bater com a ordem em exec_params
+                where_sql = ""
+                if self.where_clauses:
+                    offset = len(self.update_data)
+                    adjusted_clauses = []
+                    for i, clause in enumerate(self.where_clauses):
+                        # Troca $1, $2 pelo offset correspondente
+                        idx = offset + i + 1
+                        import re
+                        adjusted_clause = re.sub(r'\$\d+', f'${idx}', clause)
+                        adjusted_clauses.append(adjusted_clause)
+                    where_sql = f" WHERE {' AND '.join(adjusted_clauses)}"
+
+                set_sql = ", ".join(set_parts)
+                sql = f'UPDATE "{self.table_name}" SET {set_sql}{where_sql} RETURNING *;'
+                rows = await conn.fetch(sql, *exec_params)
+                data = [dict(r) for r in rows]
+                return QueryResult(data)
+
+            elif self.op_type == "delete":
+                sql = f'DELETE FROM "{self.table_name}"{where_sql} RETURNING *;'
+                rows = await conn.fetch(sql, *self.params)
+                data = [dict(r) for r in rows]
+                return QueryResult(data)
+
+            return QueryResult([])
+
+
+class PostgresDatabaseClient:
+    def __init__(self, pool: asyncpg.Pool):
+        self.pool = pool
+
+    def table(self, table_name: str) -> TableQueryBuilder:
+        return TableQueryBuilder(self.pool, table_name)
+
+
+async def get_service_db() -> PostgresDatabaseClient:
+    pool = await get_pool()
+    return PostgresDatabaseClient(pool)
+
+
+async def get_anon_db() -> PostgresDatabaseClient:
+    return await get_service_db()
+
+
+async def get_db() -> PostgresDatabaseClient:
     return await get_service_db()
