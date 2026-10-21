@@ -173,7 +173,7 @@ async def create_association(
             "category": f"association:{assoc_type}",
             "description": description,
             "logo_url": logo_url,
-            "is_approved": is_admin,
+            "is_approved": True,  # Aprovado diretamente para exibição imediata
             "is_active": True,
             "created_by": user["id"],
         }

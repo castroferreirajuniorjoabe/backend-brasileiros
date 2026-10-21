@@ -39,6 +39,21 @@ class QueryResult:
         self.count = count if count is not None else len(data)
 
 
+def _normalize_row(row) -> Dict[str, Any]:
+    """Converte UUID, datetime e tipos complexos do asyncpg para compatibilidade com o formato JSON retornado pelo Supabase."""
+    import uuid
+    import datetime
+    out = {}
+    for k, v in dict(row).items():
+        if isinstance(v, uuid.UUID):
+            out[k] = str(v)
+        elif isinstance(v, (datetime.datetime, datetime.date, datetime.time)):
+            out[k] = v.isoformat()
+        else:
+            out[k] = v
+    return out
+
+
 class TableQueryBuilder:
     def __init__(self, pool: asyncpg.Pool, table_name: str):
         self.pool = pool
@@ -79,7 +94,7 @@ class TableQueryBuilder:
 
     def neq(self, column: str, value: Any):
         self.params.append(value)
-        self.where_clauses.append(f'"{column}" != ${len(self.params)}')
+        self.where_clauses.append(f'("{column}" != ${len(self.params)} OR "{column}" IS NULL)')
         return self
 
     def ilike(self, column: str, value: Any):
@@ -93,14 +108,30 @@ class TableQueryBuilder:
         return self
 
     def or_(self, expr: str):
-        # Ex: "email.eq.foo,phone.eq.bar"
+        # Ex: "category.ilike.moving_sale:%,name.ilike.[MUDANÇA]%" or "email.eq.foo,phone.eq.bar"
         parts = expr.split(",")
         sub_clauses = []
         for part in parts:
+            part = part.strip()
             if ".eq." in part:
                 col, val = part.split(".eq.", 1)
                 self.params.append(val)
                 sub_clauses.append(f'"{col}" = ${len(self.params)}')
+            elif ".ilike." in part:
+                col, val = part.split(".ilike.", 1)
+                self.params.append(val)
+                sub_clauses.append(f'"{col}" ILIKE ${len(self.params)}')
+            elif ".like." in part:
+                col, val = part.split(".like.", 1)
+                self.params.append(val)
+                sub_clauses.append(f'"{col}" LIKE ${len(self.params)}')
+            elif ".is." in part:
+                col, val = part.split(".is.", 1)
+                if val.lower() == "null":
+                    sub_clauses.append(f'"{col}" IS NULL')
+                else:
+                    self.params.append(val)
+                    sub_clauses.append(f'"{col}" IS ${len(self.params)}')
         if sub_clauses:
             self.where_clauses.append(f"({' OR '.join(sub_clauses)})")
         return self
@@ -123,6 +154,12 @@ class TableQueryBuilder:
         self.offset_val = start
         return self
 
+    def range(self, start: int, end: int):
+        """Supabase compatibility: .range(start, end) where end is inclusive."""
+        self.offset_val = start
+        self.limit_val = max(0, end - start + 1)
+        return self
+
     async def execute(self) -> QueryResult:
         async with self.pool.acquire() as conn:
             where_sql = f" WHERE {' AND '.join(self.where_clauses)}" if self.where_clauses else ""
@@ -135,7 +172,7 @@ class TableQueryBuilder:
                 cols = "*" if self.select_columns in ("*", None) else self.select_columns
                 sql = f'SELECT {cols} FROM "{self.table_name}"{where_sql}{order_sql}{limit_sql}{offset_sql};'
                 rows = await conn.fetch(sql, *self.params)
-                data = [dict(r) for r in rows]
+                data = [_normalize_row(r) for r in rows]
                 return QueryResult(data)
 
             elif self.op_type == "insert":
@@ -147,20 +184,27 @@ class TableQueryBuilder:
                 inserted_data = []
                 for record in records:
                     keys = list(record.keys())
-                    vals = [record[k] for k in keys]
+                    vals = []
+                    for k in keys:
+                        v = record[k]
+                        if isinstance(v, (dict, list)):
+                            vals.append(json.dumps(v))
+                        else:
+                            vals.append(v)
                     cols_str = ", ".join(f'"{k}"' for k in keys)
                     placeholders = ", ".join(f"${i+1}" for i in range(len(vals)))
                     sql = f'INSERT INTO "{self.table_name}" ({cols_str}) VALUES ({placeholders}) RETURNING *;'
                     row = await conn.fetchrow(sql, *vals)
                     if row:
-                        inserted_data.append(dict(row))
+                        inserted_data.append(_normalize_row(row))
                 return QueryResult(inserted_data)
 
             elif self.op_type == "update":
                 set_parts = []
                 exec_params = []
                 for k, v in self.update_data.items():
-                    exec_params.append(v)
+                    val = json.dumps(v) if isinstance(v, (dict, list)) else v
+                    exec_params.append(val)
                     set_parts.append(f'"{k}" = ${len(exec_params)}')
 
                 where_parts = []
@@ -186,13 +230,13 @@ class TableQueryBuilder:
                 set_sql = ", ".join(set_parts)
                 sql = f'UPDATE "{self.table_name}" SET {set_sql}{where_sql} RETURNING *;'
                 rows = await conn.fetch(sql, *exec_params)
-                data = [dict(r) for r in rows]
+                data = [_normalize_row(r) for r in rows]
                 return QueryResult(data)
 
             elif self.op_type == "delete":
                 sql = f'DELETE FROM "{self.table_name}"{where_sql} RETURNING *;'
                 rows = await conn.fetch(sql, *self.params)
-                data = [dict(r) for r in rows]
+                data = [_normalize_row(r) for r in rows]
                 return QueryResult(data)
 
             return QueryResult([])

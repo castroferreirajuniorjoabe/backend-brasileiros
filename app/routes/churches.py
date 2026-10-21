@@ -37,7 +37,7 @@ async def create_church(
 ):
     data = church.dict(exclude_none=True)
     data["user_id"] = user["id"]
-    data["status"] = "pending"
+    data["status"] = "approved"
 
     for field in ["website", "instagram", "facebook", "youtube"]:
         if data.get(field):

@@ -41,26 +41,29 @@ async def _upload(
             detail=f"{label.capitalize()} excede o tamanho máximo de {MAX_FILE_SIZE_MB}MB.",
         )
 
-    # 1. Tentar upload para o Supabase Storage (Bucket 'uploads')
+    # 1. Tentar upload para o Google Cloud Storage (Bucket Firebase/GCP)
     try:
-        from app.database import get_service_db
+        import asyncio
+        from google.cloud import storage
 
-        db = await get_service_db()
+        def _sync_gcs_upload(data: bytes, path: str, content_type: str) -> str:
+            client = storage.Client(project=settings.FIREBASE_PROJECT_ID)
+            bucket_name = settings.FIREBASE_STORAGE_BUCKET or f"{settings.FIREBASE_PROJECT_ID}.firebasestorage.app"
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(path)
+            blob.upload_from_string(data, content_type=content_type)
+            # URL pública direta via GCS
+            return f"https://storage.googleapis.com/{bucket_name}/{path}"
+
         ext = os.path.splitext(file.filename or "")[1] or ".jpg"
         unique_name = f"{uuid.uuid4().hex}{ext}"
         storage_path = f"{folder}/{unique_name}"
+        ctype = file.content_type or "image/jpeg"
 
-        await db.storage.from_("uploads").upload(
-            storage_path,
-            content,
-            {"content-type": file.content_type or "image/jpeg"},
-        )
-        url_res = db.storage.from_("uploads").get_public_url(storage_path)
-        if inspect.iscoroutine(url_res):
-            url_res = await url_res
-        return str(url_res)
-    except Exception as sb_exc:
-        logger.warning("Falha no upload para o Supabase Storage (%s), tentando Cloudinary...", sb_exc)
+        public_url = await asyncio.to_thread(_sync_gcs_upload, content, storage_path, ctype)
+        return public_url
+    except Exception as gcs_exc:
+        logger.warning("Falha no upload para o Google Cloud Storage (%s), tentando fallback...", gcs_exc)
 
     # 2. Fallback para Cloudinary se configurado
     if settings.CLOUDINARY_CLOUD_NAME and settings.CLOUDINARY_API_KEY and settings.CLOUDINARY_API_SECRET:
@@ -84,5 +87,12 @@ async def _upload(
             return result["secure_url"]
         except Exception as c_exc:
             logger.error("Falha no upload para o Cloudinary: %s", c_exc)
+
+    # 3. Fallback para Base64 Data URL (para imagens leves caso storage falhe temporariamente)
+    if file.content_type in ALLOWED_IMAGE_TYPES and len(content) <= 2 * 1024 * 1024:
+        import base64
+        logger.info("Utilizando fallback Base64 para upload de imagem (%s bytes)", len(content))
+        b64 = base64.b64encode(content).decode("ascii")
+        return f"data:{file.content_type};base64,{b64}"
 
     raise HTTPException(status_code=502, detail="Falha no upload do arquivo. Tente novamente.")

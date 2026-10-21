@@ -140,8 +140,10 @@ async def create_ad(
         logging.getLogger(__name__).error(f"Erro ao salvar anúncio no banco: {last_err}")
         raise HTTPException(status_code=500, detail=f"Não foi possível salvar o anúncio: {str(last_err) if last_err else 'Erro desconhecido'}")
 
-    ad = result.data[0]
+    ad = dict(result.data[0])
     ad.update({
+        "id": str(ad.get("id")),
+        "user_id": str(ad.get("user_id")),
         "type": clean_type,
         "event_date": clean_event_date,
         "average_rating": None,

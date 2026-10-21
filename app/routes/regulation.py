@@ -169,7 +169,7 @@ async def create_regulation_post(
 
     images_clean = [img for img in (payload.images or []) if img and str(img).strip()][:3]
 
-    initial_status = "approved" if user.get("is_admin") else "pending"
+    initial_status = "approved"
 
     record = {
         "user_id": user["id"],

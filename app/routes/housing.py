@@ -115,7 +115,7 @@ async def create_housing_ad(
         "image_url_2": image_url_2,
         
         # O fields default for ads
-        "status": AdStatus.PENDING.value,
+        "status": AdStatus.APPROVED.value,
         "email": user["email"], 
         "address": city,
         "category": "Moradia"
@@ -143,7 +143,7 @@ async def list_housing_ads(
         .select("*", count="exact")
         .eq("ad_category", "housing")
         .eq("status", AdStatus.APPROVED.value)
-        .eq("is_occupied", False)
+        .neq("is_occupied", True)
     )
     
     if city:

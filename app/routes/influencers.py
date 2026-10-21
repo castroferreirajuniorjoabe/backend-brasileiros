@@ -33,7 +33,7 @@ async def create_influencer(
     """Cria o perfil do influencer."""
     data = influencer.dict(exclude_none=True)
     data["user_id"] = user["id"]
-    data["status"] = "pending"
+    data["status"] = "approved"
     
     # Valida url string
     for field in ["instagram", "tiktok", "youtube", "twitter", "other_social", "website"]:

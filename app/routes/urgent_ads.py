@@ -111,23 +111,7 @@ async def create_urgent_ad(
         "status": ModerationStatus.APPROVED.value,  # Aprovado diretamente para visualização e socorro imediato
         "expires_at": (utcnow() + timedelta(days=URGENT_AD_EXPIRATION_DAYS)).isoformat(),
     }
-    try:
-        result = await db.table(Tables.URGENT_ADS).insert(record).execute()
-    except Exception:
-        fallback = {
-            "user_id": user["id"],
-            "type": resolved_type,
-            "title": title,
-            "description": full_desc,
-            "city": city,
-            "contact_phone": final_phone,
-            "image_url": image_url,
-            "document_url": document_url,
-            "status": ModerationStatus.APPROVED.value,
-            "expires_at": (utcnow() + timedelta(days=URGENT_AD_EXPIRATION_DAYS)).isoformat(),
-        }
-        result = await db.table(Tables.URGENT_ADS).insert(fallback).execute()
-
+    result = await db.table(Tables.URGENT_ADS).insert(record).execute()
     return _format_urgent_ad(result.data[0])
 
 

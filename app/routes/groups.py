@@ -39,6 +39,7 @@ async def create_group(
         city = body.get("city") or "Toda a França"
         category = body.get("category") or "Comunidade"
         description = body.get("description")
+        logo_url = body.get("logo_url") or body.get("logoUrl") or body.get("logo")
     else:
         form = await request.form()
         name = form.get("name")
@@ -47,12 +48,13 @@ async def create_group(
         city = form.get("city") or "Toda a França"
         category = form.get("category") or "Comunidade"
         description = form.get("description")
-        logo = form.get("logo")
+        logo_url = form.get("logo_url") or form.get("logoUrl") or form.get("logo")
+        logo = form.get("logo") or form.get("file")
         if logo and hasattr(logo, "filename") and logo.filename:
             try:
                 logo_url = await image_utils.upload_image(logo, folder="groups")
             except Exception:
-                logo_url = None
+                pass
 
     if not name or not link:
         raise HTTPException(status_code=422, detail="Nome e link do grupo são obrigatórios.")

@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     # Firebase / GCP Cloud Run
     FIREBASE_PROJECT_ID: str = "brasileiros-na-franca-b4d2f"
+    FIREBASE_STORAGE_BUCKET: str = "brasileiros-na-franca-b4d2f.firebasestorage.app"
     FIREBASE_SERVICE_ACCOUNT_JSON: str = ""
     GOOGLE_APPLICATION_CREDENTIALS: str = ""
 
