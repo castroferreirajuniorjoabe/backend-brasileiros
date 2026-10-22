@@ -88,10 +88,10 @@ async def _upload(
         except Exception as c_exc:
             logger.error("Falha no upload para o Cloudinary: %s", c_exc)
 
-    # 3. Fallback para Base64 Data URL (para imagens leves caso storage falhe temporariamente)
-    if file.content_type in ALLOWED_IMAGE_TYPES and len(content) <= 2 * 1024 * 1024:
+    # 3. Fallback para Base64 Data URL (para imagens ou vídeos leves caso storage falhe temporariamente)
+    if (file.content_type in ALLOWED_IMAGE_TYPES or file.content_type in allowed_types) and len(content) <= 8 * 1024 * 1024:
         import base64
-        logger.info("Utilizando fallback Base64 para upload de imagem (%s bytes)", len(content))
+        logger.info("Utilizando fallback Base64 para upload (%s bytes, %s)", len(content), file.content_type)
         b64 = base64.b64encode(content).decode("ascii")
         return f"data:{file.content_type};base64,{b64}"
 
