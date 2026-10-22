@@ -35,6 +35,7 @@ from app.routes import (
     regulation,
     reports,
     reviews,
+    seasonal_animations,
     tourism_spots,
     urgent_ads,
     users,
@@ -173,6 +174,7 @@ app.include_router(payments.router)
 app.include_router(ranking.router)
 app.include_router(influencers.router)
 app.include_router(churches.router)
+app.include_router(seasonal_animations.router)
 
 # Rotas administrativas
 app.include_router(admin_router)
