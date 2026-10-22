@@ -320,14 +320,15 @@ async def google_auth(payload: GoogleOAuthRequest, db: AsyncClient = Depends(get
             }
 
             # Estratégia de inserção robusta para produção:
-            # 1. Tenta sem referral_code (mais seguro — funciona mesmo se coluna não existir)
-            # 2. Tenta com referral_code (colunas que existem no banco local e produção)
+            # 1. Tenta com dados completos
+            # 2. Tenta com fallback sem referral_code se der erro
             res_ins = None
             last_error = None
+            ref_code = f"REF{generate_sms_code()}"
 
             for attempt, record in enumerate([
-                new_record,                                        # sem referral_code
-                {**new_record, "referral_code": generate_gift_code("REF")},  # com referral_code
+                {**new_record, "referral_code": ref_code},  # tentativa com referral_code
+                new_record,                                  # fallback sem referral_code
             ]):
                 try:
                     res_ins = await db.table(Tables.USERS).insert(record).execute()
