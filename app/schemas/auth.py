@@ -60,8 +60,8 @@ class UserResponse(BaseModel):
     id: str
     name: str
     email: EmailStr
-    phone: str
-    city: str
+    phone: str | None = ""
+    city: str | None = ""
     avatar_url: str | None = None
     email_verified: bool = False
     phone_verified: bool = False
@@ -69,7 +69,7 @@ class UserResponse(BaseModel):
     is_blocked: bool = False
     referral_code: str | None = None
     created_at: str | None = None
-    user_type: str = "user"
+    user_type: str | None = "user"
 
 
 class UserUpdateRequest(BaseModel):

@@ -47,7 +47,7 @@ def _user_response(user: dict) -> UserResponse:
         is_blocked=bool(user.get("is_blocked", False)),
         referral_code=user.get("referral_code"),
         created_at=str(user.get("created_at")) if user.get("created_at") else None,
-        user_type=user.get("user_type", "user"),
+        user_type=user.get("user_type") or "user",
     )
 
 
