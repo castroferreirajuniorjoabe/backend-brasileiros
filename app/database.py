@@ -115,7 +115,17 @@ class TableQueryBuilder:
             part = part.strip()
             if ".eq." in part:
                 col, val = part.split(".eq.", 1)
-                self.params.append(val)
+                # Parse booleans se for 'true' ou 'false'
+                if val.lower() == "true":
+                    val_parsed = True
+                elif val.lower() == "false":
+                    val_parsed = False
+                elif val.lower() == "null":
+                    sub_clauses.append(f'"{col}" IS NULL')
+                    continue
+                else:
+                    val_parsed = val
+                self.params.append(val_parsed)
                 sub_clauses.append(f'"{col}" = ${len(self.params)}')
             elif ".ilike." in part:
                 col, val = part.split(".ilike.", 1)
@@ -129,6 +139,10 @@ class TableQueryBuilder:
                 col, val = part.split(".is.", 1)
                 if val.lower() == "null":
                     sub_clauses.append(f'"{col}" IS NULL')
+                elif val.lower() == "true":
+                    sub_clauses.append(f'"{col}" IS TRUE')
+                elif val.lower() == "false":
+                    sub_clauses.append(f'"{col}" IS FALSE')
                 else:
                     self.params.append(val)
                     sub_clauses.append(f'"{col}" IS ${len(self.params)}')

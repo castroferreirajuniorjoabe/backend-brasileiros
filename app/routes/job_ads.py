@@ -154,10 +154,10 @@ async def list_job_ads(
             query = query.ilike("city", f"%{city}%")
         res = await query.order("created_at", desc=True).execute()
         for item in res.data or []:
-
             job_ads.append(_format_job_ad(item))
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Erro ao buscar vagas de emprego na tabela GROUPS: {e}", exc_info=True)
 
     # Filtros em memória para garantir consistência
     filtered = []
