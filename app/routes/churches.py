@@ -43,10 +43,26 @@ async def create_church(
         if data.get(field):
             data[field] = str(data[field])
 
-    result = await db.table(Tables.CHURCHES).insert(data).execute()
-    if not result.data:
-        raise HTTPException(status_code=400, detail="Erro ao criar perfil. Você já possui uma igreja cadastrada?")
-    return result.data[0]
+    # Verifica se já possui igreja cadastrada para atualizar ou retornar mensagem clara
+    existing = await db.table(Tables.CHURCHES).select("id").eq("user_id", user["id"]).limit(1).execute()
+    if existing.data:
+        # Se já existe uma igreja para este usuário, atualiza ao invés de estourar erro de chave única
+        church_id = existing.data[0]["id"]
+        res_update = await db.table(Tables.CHURCHES).update(data).eq("id", church_id).execute()
+        if res_update.data:
+            return res_update.data[0]
+
+    try:
+        result = await db.table(Tables.CHURCHES).insert(data).execute()
+        if not result.data:
+            raise HTTPException(status_code=400, detail="Não foi possível salvar o perfil da igreja.")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Erro ao salvar igreja: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro interno ao salvar igreja: {str(e)}")
 
 @router.get("/mine", response_model=ChurchResponse)
 async def get_my_church(

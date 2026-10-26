@@ -36,9 +36,9 @@ async def _attach_ratings(db: AsyncClient, ads: list[dict]) -> list[dict]:
         ratings = stats.get(ad["id"], [])
         ad["reviews_count"] = len(ratings)
         ad["average_rating"] = round(sum(ratings) / len(ratings), 2) if ratings else None
-        if "image_2_url" in ad and "image_url_2" not in ad:
+        if not ad.get("image_url_2") and ad.get("image_2_url"):
             ad["image_url_2"] = ad.get("image_2_url")
-        if "business_hours" in ad and "opening_hours" not in ad:
+        if not ad.get("opening_hours") and ad.get("business_hours"):
             ad["opening_hours"] = ad.get("business_hours")
         # Normalização rigorosa do tipo: 'service' ou 'event'
         if not ad.get("type"):

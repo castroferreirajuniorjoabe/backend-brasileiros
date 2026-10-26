@@ -201,8 +201,16 @@ class TableQueryBuilder:
                     vals = []
                     for k in keys:
                         v = record[k]
-                        if isinstance(v, (dict, list)):
+                        if isinstance(v, dict):
                             vals.append(json.dumps(v))
+                        elif isinstance(v, list):
+                            # Se for lista de strings ou números (ex: languages, services_offered),
+                            # envia diretamente como lista nativa para o PostgreSQL aceitar como ARRAY.
+                            # Se for lista de dicionários/objetos, serializa para JSON.
+                            if v and isinstance(v[0], (dict, list)):
+                                vals.append(json.dumps(v))
+                            else:
+                                vals.append(v)
                         else:
                             vals.append(v)
                     cols_str = ", ".join(f'"{k}"' for k in keys)
@@ -217,7 +225,15 @@ class TableQueryBuilder:
                 set_parts = []
                 exec_params = []
                 for k, v in self.update_data.items():
-                    val = json.dumps(v) if isinstance(v, (dict, list)) else v
+                    if isinstance(v, dict):
+                        val = json.dumps(v)
+                    elif isinstance(v, list):
+                        if v and isinstance(v[0], (dict, list)):
+                            val = json.dumps(v)
+                        else:
+                            val = v
+                    else:
+                        val = v
                     exec_params.append(val)
                     set_parts.append(f'"{k}" = ${len(exec_params)}')
 

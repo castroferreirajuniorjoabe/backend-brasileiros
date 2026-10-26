@@ -25,12 +25,18 @@ async def create_pet_post(
     title: str = Form(...),
     description: str = Form(...),
     city: str = Form(...),
-    category: Optional[str] = Form("parque"),  # parque, escola_canina, encontro_pet, adestramento, veterinario
+    category: Optional[str] = Form("parque"),  # doacao_spa, parque, escola_canina, encontro_pet, adestramento, veterinario
     address: Optional[str] = Form(None),
     google_maps_url: Optional[str] = Form(None),
     contact_phone: Optional[str] = Form(None),
+    landline_phone: Optional[str] = Form(None),
     meetup_date: Optional[str] = Form(None),
     tips: Optional[str] = Form(None),
+    association_name: Optional[str] = Form(None),
+    pet_name: Optional[str] = Form(None),
+    pet_breed: Optional[str] = Form(None),
+    pet_age: Optional[str] = Form(None),
+    pet_gender: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     image_2: Optional[UploadFile] = File(None),
     user: dict = Depends(get_current_user),
@@ -46,102 +52,70 @@ async def create_pet_post(
     if image_2 and image_2.filename:
         image_url_2 = await image_utils.upload_image(image_2, folder="pets")
 
-    record = {
-        "user_id": user["id"],
-        "title": title.strip(),
-        "description": description.strip(),
-        "city": city.strip(),
-        "category": category.strip() if category else "parque",
-        "address": address.strip() if address else None,
-        "google_maps_url": google_maps_url.strip() if google_maps_url else None,
-        "contact_phone": contact_phone.strip() if contact_phone else None,
-        "meetup_date": meetup_date.strip() if meetup_date else None,
-        "tips": tips.strip() if tips else None,
-        "image_url": image_url,
-        "image_2_url": image_url_2,
-        "status": ModerationStatus.APPROVED.value,
-    }
+    extra_info = []
+    if association_name:
+        extra_info.append(f"🏛️ SPA / Associação Protetora: {association_name.strip()}")
+    if pet_name:
+        extra_info.append(f"🐶 Nome do Cão: {pet_name.strip()}")
+    if pet_breed:
+        extra_info.append(f"🐾 Raça / Porte: {pet_breed.strip()}")
+    if pet_age:
+        extra_info.append(f"🎂 Idade Aproximada: {pet_age.strip()}")
+    if pet_gender:
+        extra_info.append(f"⚧️ Sexo: {pet_gender.strip()}")
+    if meetup_date:
+        extra_info.append(f"📅 Data/Horário: {meetup_date.strip()}")
+    if address:
+        extra_info.append(f"📍 Endereço / Local: {address.strip()}")
+    if google_maps_url:
+        extra_info.append(f"🗺️ Google Maps: {google_maps_url.strip()}")
+    if tips:
+        extra_info.append(f"💡 Dica / Requisitos de Adoção: {tips.strip()}")
+
+    full_desc = description.strip()
+    if extra_info:
+        full_desc += "\n\n" + "\n\n".join(extra_info)
+
+    chosen_cat = (category or "parque").strip()
+    phone_to_use = contact_phone or landline_phone or user.get("phone") or "Contato Pet"
 
     try:
-        result = await db.table(Tables.PET_POSTS).insert(record).execute()
+        community_record = {
+            "user_id": user["id"],
+            "title": f"[PET - {chosen_cat.upper()}] {title.strip()}",
+            "description": full_desc,
+            "location": city.strip(),
+            "type": "pet",
+            "contact_phone": phone_to_use,
+            "image_url": image_url,
+            "image_2_url": image_url_2,
+            "status": ModerationStatus.APPROVED.value,
+        }
+        result = await db.table(Tables.CHARITY_ADS).insert(community_record).execute()
         if result.data:
-            return _format_pet_post(result.data[0])
-    except Exception:
-        # Fallback 1: tenta com image_url_2 se nome da coluna for diferente
-        try:
-            fallback_record = {
-                "user_id": user["id"],
+            created = result.data[0]
+            return {
+                "id": created["id"],
+                "user_id": created["user_id"],
                 "title": title.strip(),
                 "description": description.strip(),
                 "city": city.strip(),
-                "category": category.strip() if category else "parque",
-                "address": address.strip() if address else None,
-                "google_maps_url": google_maps_url.strip() if google_maps_url else None,
-                "contact_phone": contact_phone.strip() if contact_phone else None,
-                "meetup_date": meetup_date.strip() if meetup_date else None,
-                "tips": tips.strip() if tips else None,
-                "image_url": image_url,
-                "image_url_2": image_url_2,
-                "status": ModerationStatus.APPROVED.value,
-            }
-            result = await db.table(Tables.PET_POSTS).insert(fallback_record).execute()
-            if result.data:
-                return _format_pet_post(result.data[0])
-        except Exception:
-            pass
-
-        # Fallback 2: salva como post comunitário estruturado
-        try:
-            extra_info = []
-            if meetup_date:
-                extra_info.append(f"📅 Data/Horário do Encontro: {meetup_date.strip()}")
-            if address:
-                extra_info.append(f"📍 Endereço/Parque: {address.strip()}")
-            if google_maps_url:
-                extra_info.append(f"🗺️ Google Maps: {google_maps_url.strip()}")
-            if tips:
-                extra_info.append(f"🐾 Dica Pet: {tips.strip()}")
-
-            full_desc = description.strip()
-            if extra_info:
-                full_desc += "\n\n" + "\n\n".join(extra_info)
-
-            community_record = {
-                "user_id": user["id"],
-                "title": f"[PET - {category.upper() if category else 'PARQUE'}] {title.strip()}",
-                "description": full_desc,
-                "location": city.strip(),
-                "type": "pet",
-                "contact_phone": contact_phone or user.get("phone") or "Comunidade Pet",
+                "category": chosen_cat,
+                "address": address,
+                "google_maps_url": google_maps_url,
+                "contact_phone": phone_to_use,
+                "meetup_date": meetup_date,
+                "tips": tips,
                 "image_url": image_url,
                 "image_2_url": image_url_2,
-                "status": ModerationStatus.APPROVED.value,
+                "badge": "PET",
+                "status": "approved",
+                "created_at": created.get("created_at"),
             }
-            result = await db.table(Tables.CHARITY_ADS).insert(community_record).execute()
-            if result.data:
-                created = result.data[0]
-                return {
-                    "id": created["id"],
-                    "user_id": created["user_id"],
-                    "title": title.strip(),
-                    "description": description.strip(),
-                    "city": city.strip(),
-                    "category": category or "parque",
-                    "address": address,
-                    "google_maps_url": google_maps_url,
-                    "contact_phone": contact_phone,
-                    "meetup_date": meetup_date,
-                    "tips": tips,
-                    "image_url": image_url,
-                    "image_url_2": image_url_2,
-                    "badge": "PET",
-                    "status": "approved",
-                    "created_at": created.get("created_at"),
-                }
-        except Exception as err:
-            raise HTTPException(status_code=500, detail=f"Erro ao salvar postagem pet: {str(err)}")
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar postagem pet: {str(err)}")
 
-    raise HTTPException(status_code=500, detail="Não foi possível salvar o post canino.")
+    raise HTTPException(status_code=500, detail="Não foi possível salvar a postagem canina.")
 
 
 @router.get("", response_model=list[PetPostResponse])

@@ -117,6 +117,7 @@ async def create_job_ad(
         "description": clean_desc,
         "is_approved": True,
         "is_active": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
     try:
@@ -158,6 +159,9 @@ async def list_job_ads(
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f"Erro ao buscar vagas de emprego na tabela GROUPS: {e}", exc_info=True)
+
+    # Ordena explicitamente para garantir que novas vagas com created_at venham no topo
+    job_ads.sort(key=lambda x: x.get("created_at") or "", reverse=True)
 
     # Filtros em memória para garantir consistência
     filtered = []
