@@ -75,13 +75,21 @@ async def get_my_church(
     return result.data[0]
 
 @router.get("/{church_id}", response_model=ChurchResponse)
-async def get_church(church_id: str, db: AsyncClient = Depends(get_db)):
+async def get_church(
+    church_id: str,
+    user: Optional[dict] = Depends(get_optional_user),
+    db: AsyncClient = Depends(get_db)
+):
     result = await db.table(Tables.CHURCHES).select("*").eq("id", church_id).limit(1).execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="Igreja não encontrada.")
     church = result.data[0]
-    if church.get("status") != "approved":
-        raise HTTPException(status_code=404, detail="Igreja não encontrada ou pendente.")
+    
+    # Se ainda estiver pendente, permitir visualização pelo próprio criador ou por um admin
+    is_owner = user and user.get("id") == church.get("user_id")
+    is_admin = user and user.get("is_admin")
+    if church.get("status") != "approved" and not (is_owner or is_admin):
+        raise HTTPException(status_code=404, detail="Igreja não encontrada ou pendente de aprovação.")
     return church
 
 @router.get("", response_model=dict)

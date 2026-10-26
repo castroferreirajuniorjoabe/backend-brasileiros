@@ -72,12 +72,12 @@ class ChurchResponse(BaseModel):
     longitude: Optional[float] = None
     services_offered: Optional[List[str]] = []
     languages: Optional[List[str]] = []
-    is_verified: bool = False
-    is_featured: bool = False
-    status: str
+    is_verified: Optional[bool] = False
+    is_featured: Optional[bool] = False
+    status: Optional[str] = "approved"
     rejection_reason: Optional[str] = None
-    created_at: str
-    updated_at: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 # --- Church Schedule ---
 
