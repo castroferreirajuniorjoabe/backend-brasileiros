@@ -83,15 +83,27 @@ async def list_reviews(
     await _get_ad(db, ad_id)
     result = (
         await db.table(Tables.REVIEWS)
-        .select("*, users(name)")
+        .select("*")
         .eq("ad_id", ad_id)
         .order("created_at", desc=True)
         .execute()
     )
     items: list[dict] = []
     ratings: list[int] = []
-    for r in result.data or []:
-        r["user_name"] = (r.pop("users", None) or {}).get("name")
+    raw_reviews = result.data or []
+
+    # Busca nomes dos autores se houver avaliações
+    user_ids = list({r["user_id"] for r in raw_reviews if r.get("user_id")})
+    user_map = {}
+    if user_ids:
+        try:
+            users_res = await db.table(Tables.USERS).select("id, name").in_("id", user_ids).execute()
+            user_map = {u["id"]: u.get("name") for u in (users_res.data or [])}
+        except Exception:
+            user_map = {}
+
+    for r in raw_reviews:
+        r["user_name"] = user_map.get(r.get("user_id")) or "Brasileiro(a)"
         ratings.append(r["rating"])
         items.append(r)
     average = round(sum(ratings) / len(ratings), 2) if ratings else None

@@ -35,16 +35,26 @@ async def list_comments(
     try:
         res = (
             await db.table(Tables.ITEM_COMMENTS)
-            .select("*, users(name)")
+            .select("*")
             .eq("target_type", target_type)
             .eq("target_id", target_id)
             .order("created_at", desc=False)
             .execute()
         )
         if res.data is not None:
+            raw_comments = res.data or []
+            user_ids = list({c["user_id"] for c in raw_comments if c.get("user_id")})
+            user_map = {}
+            if user_ids:
+                try:
+                    users_res = await db.table(Tables.USERS).select("id, name").in_("id", user_ids).execute()
+                    user_map = {u["id"]: u.get("name") for u in (users_res.data or [])}
+                except Exception:
+                    user_map = {}
+
             items = []
-            for c in res.data:
-                u_name = (c.pop("users", None) or {}).get("name") or c.get("user_name") or "Brasileiro(a)"
+            for c in raw_comments:
+                u_name = user_map.get(c.get("user_id")) or c.get("user_name") or "Brasileiro(a)"
                 items.append(
                     ItemCommentResponse(
                         id=str(c["id"]),
