@@ -65,7 +65,7 @@ class RejectRequest(BaseModel):
 
 class ReviewCreateRequest(BaseModel):
     rating: int = Field(ge=1, le=5, description="Nota de 1 a 5")
-    comment: str | None = Field(default=None, max_length=1000)
+    comment: str | None = Field(default=None, max_length=5000)
 
 
 class ReviewResponse(BaseModel):
