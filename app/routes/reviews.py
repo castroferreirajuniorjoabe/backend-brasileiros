@@ -42,7 +42,17 @@ async def create_review(
         .execute()
     )
     if existing.data:
-        raise HTTPException(status_code=409, detail="Você já avaliou este anúncio.")
+        # Se já avaliou antes, atualiza a avaliação com a nova nota e comentário
+        review_id = existing.data[0]["id"]
+        res_update = await db.table(Tables.REVIEWS).update({
+            "rating": payload.rating,
+            "comment": payload.comment,
+            "name": user.get("name") or "Brasileiro(a)",
+            "user_name": user.get("name") or "Brasileiro(a)"
+        }).eq("id", review_id).execute()
+        review = res_update.data[0] if res_update.data else {"id": review_id, "ad_id": ad_id, "user_id": user["id"], "rating": payload.rating, "comment": payload.comment}
+        review["user_name"] = user.get("name")
+        return review
 
     result = await db.table(Tables.REVIEWS).insert(
         {
@@ -50,6 +60,8 @@ async def create_review(
             "user_id": user["id"],
             "rating": payload.rating,
             "comment": payload.comment,
+            "name": user.get("name") or "Brasileiro(a)",
+            "user_name": user.get("name") or "Brasileiro(a)",
         }
     ).execute()
     review = result.data[0]
