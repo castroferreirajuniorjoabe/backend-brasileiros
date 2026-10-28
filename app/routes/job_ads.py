@@ -1,6 +1,7 @@
 """Módulo de Vagas e Anúncios de Emprego: Contato direto sem burocracia."""
 
 import json
+from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, Form, HTTPException, Query
 from supabase import AsyncClient
