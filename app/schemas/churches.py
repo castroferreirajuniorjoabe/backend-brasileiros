@@ -8,7 +8,7 @@ from typing import List, Optional
 class ChurchCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=150)
     denomination: str
-    description: Optional[str] = Field(None, max_length=1000)
+    description: Optional[str] = Field(None, max_length=5000)
     address: str
     city: str
     postal_code: Optional[str] = None
@@ -30,7 +30,7 @@ class ChurchCreate(BaseModel):
 class ChurchUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=150)
     denomination: Optional[str] = None
-    description: Optional[str] = Field(None, max_length=1000)
+    description: Optional[str] = Field(None, max_length=5000)
     address: Optional[str] = None
     city: Optional[str] = None
     postal_code: Optional[str] = None

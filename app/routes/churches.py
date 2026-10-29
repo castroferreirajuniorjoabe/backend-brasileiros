@@ -39,22 +39,30 @@ async def create_church(
     data["user_id"] = user["id"]
     data["status"] = "approved"
 
-    for field in ["website", "instagram", "facebook", "youtube"]:
-        if data.get(field):
-            data[field] = str(data[field])
+    for field in ["phone", "whatsapp", "email", "website", "instagram", "facebook", "youtube", "postal_code", "banner_image"]:
+        if field in data and data[field] is not None:
+            val = str(data[field]).strip()
+            data[field] = val if val else None
 
-    # Verifica se já possui igreja cadastrada para atualizar ou retornar mensagem clara
+    # Verifica se já possui igreja cadastrada para atualizar ao invés de duplicar
     existing = await db.table(Tables.CHURCHES).select("id").eq("user_id", user["id"]).limit(1).execute()
     if existing.data:
-        # Se já existe uma igreja para este usuário, atualiza ao invés de estourar erro de chave única
         church_id = existing.data[0]["id"]
         res_update = await db.table(Tables.CHURCHES).update(data).eq("id", church_id).execute()
         if res_update.data:
             return res_update.data[0]
+        # Se update não retornou data diretamente, busca o registro atualizado
+        refetched = await db.table(Tables.CHURCHES).select("*").eq("id", church_id).limit(1).execute()
+        if refetched.data:
+            return refetched.data[0]
 
     try:
         result = await db.table(Tables.CHURCHES).insert(data).execute()
         if not result.data:
+            # Em alguns drivers supabase, insert pode precisar de select
+            refetched = await db.table(Tables.CHURCHES).select("*").eq("user_id", user["id"]).limit(1).execute()
+            if refetched.data:
+                return refetched.data[0]
             raise HTTPException(status_code=400, detail="Não foi possível salvar o perfil da igreja.")
         return result.data[0]
     except HTTPException:
@@ -146,7 +154,12 @@ async def update_church(
             data[field] = str(data[field])
             
     result = await db.table(Tables.CHURCHES).update(data).eq("id", church_id).execute()
-    return result.data[0]
+    if result.data:
+        return result.data[0]
+    refetched = await db.table(Tables.CHURCHES).select("*").eq("id", church_id).limit(1).execute()
+    if refetched.data:
+        return refetched.data[0]
+    raise HTTPException(status_code=400, detail="Não foi possível atualizar a igreja.")
 
 # --- Church Schedule ---
 
