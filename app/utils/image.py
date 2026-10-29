@@ -11,7 +11,15 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+ALLOWED_IMAGE_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+    "image/avif",
+    "image/gif",
+}
 ALLOWED_DOC_TYPES = ALLOWED_IMAGE_TYPES | {"application/pdf"}
 MAX_FILE_SIZE_MB = 10
 
