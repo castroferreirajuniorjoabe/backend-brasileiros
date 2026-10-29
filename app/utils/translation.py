@@ -90,41 +90,62 @@ def translate_text(text: str, target_lang: str, source_lang: str = "auto") -> st
     return text
 
 
-def translate_job_fields(job_dict: dict, target_lang: str) -> dict:
+from concurrent.futures import ThreadPoolExecutor
+
+
+def translate_job_fields(job_dict: dict, target_lang: str, translate_desc: bool = True) -> dict:
     """
     Traduz os campos dinâmicos de um anúncio de emprego:
     - title
-    - description
-    Preserva todos os outros campos intactos (IDs, contatos, telefones, links, etc).
-    Se o idioma destino for 'pt', preserva o texto original cadastrado sem tradução.
+    - description (se translate_desc for True)
+    Preserva todos os outros campos intactos.
     """
     target = _clean_lang(target_lang)
     
-    # Faz uma cópia rasa do dicionário
     item = dict(job_dict)
     original_title = item.get("title") or ""
     original_desc = item.get("description") or ""
 
-    # Adiciona metadados úteis para o front-end
     item["original_title"] = original_title
     item["original_description"] = original_desc
     item["translated_lang"] = target
 
-    # Se for português, não altera título nem descrição
     if target == "pt":
         item["title"] = original_title
         item["description"] = original_desc
         return item
 
-    # Traduz título para FR ou EN
     if original_title:
         translated_title = translate_text(original_title, target)
         item["title"] = translated_title if translated_title else original_title
 
-    # Traduz descrição para FR ou EN
-    if original_desc:
+    if translate_desc and original_desc:
         translated_desc = translate_text(original_desc, target)
         item["description"] = translated_desc if translated_desc else original_desc
 
     return item
+
+
+def translate_job_list(job_list: list[dict], target_lang: str) -> list[dict]:
+    """
+    Traduz em paralelo múltiplos anúncios de forma ultra rápida com ThreadPoolExecutor.
+    Traduz títulos e resumos das vagas em paralelo garantindo resposta em sub-segundos.
+    """
+    target = _clean_lang(target_lang)
+    if target == "pt" or not job_list:
+        for job in job_list:
+            job["original_title"] = job.get("title")
+            job["original_description"] = job.get("description")
+            job["translated_lang"] = "pt"
+        return job_list
+
+    def _worker(job):
+        try:
+            return translate_job_fields(job, target, translate_desc=True)
+        except Exception:
+            return job
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        return list(executor.map(_worker, job_list))
+
 

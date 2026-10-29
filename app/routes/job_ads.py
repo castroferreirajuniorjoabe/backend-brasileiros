@@ -10,7 +10,7 @@ from app.database import get_db
 from app.models import ModerationStatus, Tables
 from app.schemas.community import JobAdResponse
 from app.utils.deps import get_current_user, get_optional_user
-from app.utils.translation import translate_job_fields
+from app.utils.translation import translate_job_fields, translate_job_list
 
 router = APIRouter(prefix="/job-ads", tags=["Vagas & Empregos"])
 
@@ -180,15 +180,16 @@ async def list_job_ads(
             ):
                 continue
         
-        # Tradução automática se solicitado e diferente do original
-        if lang:
-            job = translate_job_fields(job, lang)
-        else:
+        filtered.append(job)
+
+    # Tradução automática ultra rápida em lote usando ThreadPoolExecutor
+    if lang and lang.lower() != "pt":
+        filtered = translate_job_list(filtered, lang)
+    else:
+        for job in filtered:
             job["original_title"] = job.get("title")
             job["original_description"] = job.get("description")
             job["translated_lang"] = "pt"
-
-        filtered.append(job)
 
     return filtered
 
