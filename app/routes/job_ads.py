@@ -17,6 +17,43 @@ router = APIRouter(prefix="/job-ads", tags=["Vagas & Empregos"])
 JOB_PREFIX = "job_ad:"
 
 
+def unwrap_link(url: Optional[str]) -> Optional[str]:
+    """Extrai a URL original de redirecionadores (Facebook l.php, Google url, etc.)."""
+    if not url:
+        return None
+    url = url.strip()
+    if not url:
+        return None
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = f"https://{url}"
+
+    import urllib.parse
+    try:
+        if "facebook.com/l.php" in url:
+            parsed = urllib.parse.urlparse(url)
+            qs = urllib.parse.parse_qs(parsed.query)
+            if "u" in qs:
+                target = qs["u"][0]
+                sub_parsed = urllib.parse.urlparse(target)
+                sub_qs = urllib.parse.parse_qs(sub_parsed.query)
+                sub_qs.pop("fbclid", None)
+                sub_qs.pop("__tn__", None)
+                sub_qs.pop("h", None)
+                new_query = urllib.parse.urlencode(sub_qs, doseq=True)
+                return urllib.parse.urlunparse((
+                    sub_parsed.scheme, sub_parsed.netloc, sub_parsed.path,
+                    sub_parsed.params, new_query, sub_parsed.fragment
+                )).rstrip("?")
+        if "google.com/url" in url:
+            parsed = urllib.parse.urlparse(url)
+            qs = urllib.parse.parse_qs(parsed.query)
+            if "q" in qs: return qs["q"][0]
+            if "url" in qs: return qs["url"][0]
+    except Exception:
+        pass
+    return url
+
+
 def _format_job_ad(record: dict) -> dict:
     """Padroniza o retorno do anúncio de emprego independente do storage usado."""
     ad_id = record.get("id")
@@ -32,6 +69,11 @@ def _format_job_ad(record: dict) -> dict:
     status = record.get("status") or "approved"
     created_at = record.get("created_at")
     image_url = record.get("logo_url") or record.get("image_url")
+
+    # Se whatsapp for texto inválido (sem números), desconsiderar
+    import re
+    if whatsapp and not re.search(r'\d{6,}', str(whatsapp)):
+        whatsapp = None
 
     # Se estiver empacotado no formato comunitário do grupo
     category = record.get("category") or ""
@@ -52,10 +94,12 @@ def _format_job_ad(record: dict) -> dict:
             pass
 
     if not application_url and description:
-        import re
         match = re.search(r'(?:Link do Anúncio|Link da vaga|\[LINK)[\s\S]*?(https?://\S+)', description, re.IGNORECASE)
         if match:
             application_url = match.group(1).rstrip(']').strip()
+
+    if application_url:
+        application_url = unwrap_link(application_url)
 
     return {
         "id": str(ad_id),
@@ -103,9 +147,11 @@ async def create_job_ad(
     clean_landline = landline_phone.strip() if landline_phone and landline_phone.strip() else None
 
     raw_link = application_url or link
-    clean_link = raw_link.strip() if raw_link and raw_link.strip() else None
-    if clean_link and not clean_link.startswith("http://") and not clean_link.startswith("https://"):
-        clean_link = f"https://{clean_link}"
+    clean_link = unwrap_link(raw_link)
+
+    import re
+    if clean_whatsapp and not re.search(r'\d{6,}', clean_whatsapp):
+        clean_whatsapp = None
 
     if not clean_email and not clean_whatsapp and not clean_phone and not clean_landline and not clean_link:
         raise HTTPException(
