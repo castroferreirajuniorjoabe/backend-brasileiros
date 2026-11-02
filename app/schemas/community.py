@@ -139,6 +139,8 @@ class JobAdResponse(BaseModel):
     whatsapp: str | None = None
     phone: str | None = None
     landline_phone: str | None = None
+    application_url: str | None = None
+    link: str | None = None
     image_url: str | None = None
     badge: str = "EMPREGO"
     status: str

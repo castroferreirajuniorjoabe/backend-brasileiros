@@ -35,6 +35,7 @@ def _format_job_ad(record: dict) -> dict:
 
     # Se estiver empacotado no formato comunitário do grupo
     category = record.get("category") or ""
+    application_url = None
     if category.startswith(JOB_PREFIX):
         try:
             raw_meta = category[len(JOB_PREFIX):]
@@ -44,10 +45,17 @@ def _format_job_ad(record: dict) -> dict:
             whatsapp = meta.get("whatsapp", whatsapp)
             phone = meta.get("phone", phone)
             landline_phone = meta.get("landline_phone", landline_phone)
+            application_url = meta.get("application_url") or meta.get("link")
             if not image_url and meta.get("image_url"):
                 image_url = meta.get("image_url")
         except Exception:
             pass
+
+    if not application_url and description:
+        import re
+        match = re.search(r'(?:Link do Anúncio|Link da vaga|\[LINK)[\s\S]*?(https?://\S+)', description, re.IGNORECASE)
+        if match:
+            application_url = match.group(1).rstrip(']').strip()
 
     return {
         "id": str(ad_id),
@@ -60,6 +68,8 @@ def _format_job_ad(record: dict) -> dict:
         "whatsapp": whatsapp,
         "phone": phone,
         "landline_phone": landline_phone,
+        "application_url": application_url,
+        "link": application_url,
         "image_url": image_url,
         "badge": "EMPREGO",
         "status": status,
@@ -77,10 +87,12 @@ async def create_job_ad(
     whatsapp: Optional[str] = Form(None),
     phone: Optional[str] = Form(None),
     landline_phone: Optional[str] = Form(None),
+    application_url: Optional[str] = Form(None),
+    link: Optional[str] = Form(None),
     user: dict = Depends(get_current_user),
     db: AsyncClient = Depends(get_db),
 ):
-    """Cria um anúncio de emprego com contato direto (WhatsApp, Email ou Telefone)."""
+    """Cria um anúncio de emprego com contato direto (WhatsApp, Email ou Telefone) e link opcional de anúncio externo."""
     clean_title = title.strip()
     clean_city = city.strip()
     clean_contract = contract_type.strip()
@@ -90,23 +102,33 @@ async def create_job_ad(
     clean_phone = phone.strip() if phone and phone.strip() else None
     clean_landline = landline_phone.strip() if landline_phone and landline_phone.strip() else None
 
-    if not clean_email and not clean_whatsapp and not clean_phone and not clean_landline:
+    raw_link = application_url or link
+    clean_link = raw_link.strip() if raw_link and raw_link.strip() else None
+    if clean_link and not clean_link.startswith("http://") and not clean_link.startswith("https://"):
+        clean_link = f"https://{clean_link}"
+
+    if not clean_email and not clean_whatsapp and not clean_phone and not clean_landline and not clean_link:
         raise HTTPException(
             status_code=422,
-            detail="Informe pelo menos um meio de contato (WhatsApp, E-mail ou Telefone).",
+            detail="Informe pelo menos um meio de contato (WhatsApp, E-mail, Telefone ou Link da Vaga).",
         )
 
     # Inserção direta no schema comunitário da tabela GROUPS
-    meta_json = json.dumps({
+    meta_dict = {
         "contract_type": clean_contract,
         "email": clean_email,
         "whatsapp": clean_whatsapp,
         "phone": clean_phone,
         "landline_phone": clean_landline,
-    })
+    }
+    if clean_link:
+        meta_dict["application_url"] = clean_link
+        meta_dict["link"] = clean_link
 
-    main_contact = clean_whatsapp or clean_phone or clean_landline or clean_email or ""
-    contact_link = f"https://wa.me/{clean_whatsapp.replace('+', '').replace(' ', '')}" if clean_whatsapp else (f"mailto:{clean_email}" if clean_email else f"tel:{clean_phone or clean_landline}")
+    meta_json = json.dumps(meta_dict)
+
+    main_contact = clean_whatsapp or clean_phone or clean_landline or clean_email or clean_link or ""
+    contact_link = clean_link if clean_link else (f"https://wa.me/{clean_whatsapp.replace('+', '').replace(' ', '')}" if clean_whatsapp else (f"mailto:{clean_email}" if clean_email else f"tel:{clean_phone or clean_landline}"))
 
     group_record = {
         "created_by": user["id"],
