@@ -177,16 +177,15 @@ async def create_job_ad(
     contact_link = clean_link if clean_link else (f"https://wa.me/{clean_whatsapp.replace('+', '').replace(' ', '')}" if clean_whatsapp else (f"mailto:{clean_email}" if clean_email else f"tel:{clean_phone or clean_landline}"))
 
     group_record = {
-        "created_by": user["id"],
+        "created_by": user.get("id"),
         "name": f"[EMPREGO] {clean_title}",
         "city": clean_city,
         "category": f"{JOB_PREFIX}{meta_json}",
         "platform": "whatsapp" if clean_whatsapp else "facebook",
-        "invite_link": contact_link,
+        "invite_link": contact_link or "https://brasileirosnafranca.com/empregos",
         "description": clean_desc,
         "is_approved": True,
         "is_active": True,
-        "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
     try:

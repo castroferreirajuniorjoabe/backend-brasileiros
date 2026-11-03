@@ -211,6 +211,12 @@ class TableQueryBuilder:
                                 vals.append(json.dumps(v))
                             else:
                                 vals.append(v)
+                        elif isinstance(v, str) and (k.endswith('_at') or k.endswith('_date') or k in ('created_at', 'updated_at', 'approved_at')):
+                            try:
+                                from datetime import datetime
+                                vals.append(datetime.fromisoformat(v))
+                            except Exception:
+                                vals.append(v)
                         else:
                             vals.append(v)
                     cols_str = ", ".join(f'"{k}"' for k in keys)
@@ -231,6 +237,12 @@ class TableQueryBuilder:
                         if v and isinstance(v[0], (dict, list)):
                             val = json.dumps(v)
                         else:
+                            val = v
+                    elif isinstance(v, str) and (k.endswith('_at') or k.endswith('_date') or k in ('created_at', 'updated_at', 'approved_at')):
+                        try:
+                            from datetime import datetime
+                            val = datetime.fromisoformat(v)
+                        except Exception:
                             val = v
                     else:
                         val = v
