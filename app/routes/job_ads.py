@@ -67,7 +67,13 @@ def _format_job_ad(record: dict) -> dict:
     phone = record.get("phone") or record.get("contact_phone")
     landline_phone = record.get("landline_phone")
     status = record.get("status") or "approved"
-    created_at = record.get("created_at")
+    raw_created = record.get("created_at")
+    created_at = None
+    if raw_created is not None:
+        if hasattr(raw_created, "isoformat"):
+            created_at = raw_created.isoformat()
+        else:
+            created_at = str(raw_created)
     image_url = record.get("logo_url") or record.get("image_url")
 
     # Se whatsapp for texto inválido (sem números), desconsiderar

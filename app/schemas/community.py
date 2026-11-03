@@ -1,5 +1,6 @@
 """Schemas de grupos parceiros, anúncios de urgência e de caridade."""
 
+from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.models import GroupPlatform, UrgentType
@@ -144,7 +145,7 @@ class JobAdResponse(BaseModel):
     image_url: str | None = None
     badge: str = "EMPREGO"
     status: str
-    created_at: str | None = None
+    created_at: str | datetime | None = None
     original_title: str | None = None
     original_description: str | None = None
     translated_lang: str | None = None
