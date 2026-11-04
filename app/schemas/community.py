@@ -41,11 +41,12 @@ class UrgentAdResponse(BaseModel):
     city: str | None = ""
     contact_phone: str | None = ""
     image_url: str | None = None
+    photo_url: str | None = None
     document_url: str | None = None
     badge: str = "URGENTE"
     status: str
-    expires_at: str | None = None
-    created_at: str | None = None
+    expires_at: str | datetime | None = None
+    created_at: str | datetime | None = None
 
 
 # ---------- Anúncios de caridade ----------

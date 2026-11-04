@@ -25,7 +25,9 @@ router = APIRouter(prefix="/urgent-ads", tags=["Anúncios de Urgência"])
 def _format_urgent_ad(ad: dict) -> dict:
     a = dict(ad)
     a["city"] = a.get("location") or a.get("city") or "França"
-    a["image_url"] = a.get("photo_url") or a.get("image_url")
+    img = a.get("photo_url") or a.get("image_url")
+    a["image_url"] = img
+    a["photo_url"] = img
     desc = a.get("description") or ""
     title = a.get("title") or ""
     phone = a.get("contact_phone") or a.get("phone") or ""
@@ -49,6 +51,15 @@ def _format_urgent_ad(ad: dict) -> dict:
         badge = "RESOLVIDO"
 
     a["badge"] = badge
+
+    for d_key in ("created_at", "expires_at"):
+        val = a.get(d_key)
+        if val is not None:
+            if hasattr(val, "isoformat"):
+                a[d_key] = val.isoformat()
+            else:
+                a[d_key] = str(val)
+
     return a
 
 
@@ -63,6 +74,9 @@ async def create_urgent_ad(
     phone: Optional[str] = Form(None),
     bo_number: Optional[str] = Form(None),
     police_report_number: Optional[str] = Form(None),
+    image_url: Optional[str] = Form(None),
+    photo_url: Optional[str] = Form(None),
+    document_url: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     document: Optional[UploadFile] = File(
         None, description="Boletim de ocorrência / documento comprobatório"
@@ -83,15 +97,22 @@ async def create_urgent_ad(
     final_bo = bo_number or police_report_number or ""
     doc_file = document or police_report_file
 
-    image_url = (
-        await image_utils.upload_image(image, folder="urgent")
-        if image and image.filename
-        else None
+    final_image_url = (
+        image_url
+        or photo_url
+        or (
+            await image_utils.upload_image(image, folder="urgent")
+            if image and getattr(image, "filename", None)
+            else None
+        )
     )
-    document_url = (
-        await image_utils.upload_document(doc_file, folder="urgent/docs")
-        if doc_file and doc_file.filename
-        else None
+    final_document_url = (
+        document_url
+        or (
+            await image_utils.upload_document(doc_file, folder="urgent/docs")
+            if doc_file and getattr(doc_file, "filename", None)
+            else None
+        )
     )
 
     full_desc = description
@@ -106,8 +127,8 @@ async def create_urgent_ad(
         "title": title,
         "description": full_desc,
         "location": city,
-        "photo_url": image_url,
-        "document_url": document_url,
+        "photo_url": final_image_url,
+        "document_url": final_document_url,
         "status": ModerationStatus.APPROVED.value,  # Aprovado diretamente para visualização e socorro imediato
         "expires_at": (utcnow() + timedelta(days=URGENT_AD_EXPIRATION_DAYS)).isoformat(),
     }
