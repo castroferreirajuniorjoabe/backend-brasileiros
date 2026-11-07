@@ -54,16 +54,25 @@ def unwrap_link(url: Optional[str]) -> Optional[str]:
     return url
 
 
+def _has_valid_digits(val: Optional[str]) -> bool:
+    if not val:
+        return False
+    import re
+    return len(re.sub(r"\D", "", str(val))) >= 6
+
+
 def _format_job_ad(record: dict) -> dict:
     """Padroniza o retorno do anúncio de emprego independente do storage usado."""
+    import re
+
     ad_id = record.get("id")
-    user_id = record.get("user_id") or ""
+    user_id = record.get("user_id") or record.get("created_by") or ""
     title = record.get("title") or record.get("name") or "Vaga de Emprego"
     city = record.get("city") or record.get("location") or "França"
     description = record.get("description") or ""
     contract_type = record.get("contract_type") or "CDI"
     email = record.get("email")
-    whatsapp = record.get("whatsapp") or record.get("phone") or record.get("contact_phone")
+    whatsapp = record.get("whatsapp")
     phone = record.get("phone") or record.get("contact_phone")
     landline_phone = record.get("landline_phone")
     status = record.get("status") or "approved"
@@ -75,11 +84,6 @@ def _format_job_ad(record: dict) -> dict:
         else:
             created_at = str(raw_created)
     image_url = record.get("logo_url") or record.get("image_url")
-
-    # Se whatsapp for texto inválido (sem números), desconsiderar
-    import re
-    if whatsapp and not re.search(r'\d{6,}', str(whatsapp)):
-        whatsapp = None
 
     # Se estiver empacotado no formato comunitário do grupo
     category = record.get("category") or ""
@@ -98,6 +102,31 @@ def _format_job_ad(record: dict) -> dict:
                 image_url = meta.get("image_url")
         except Exception:
             pass
+
+    if description:
+        if not whatsapp:
+            m_wa = re.search(r'(?:💬\s*WhatsApp|WhatsApp)\s*:\s*([^\n\r]+)', description, re.IGNORECASE)
+            if m_wa and _has_valid_digits(m_wa.group(1)):
+                whatsapp = m_wa.group(1).strip()
+        if not phone:
+            m_ph = re.search(r'(?:📞\s*Telefone(?:\s*Celular)?|Telefone\s*Celular|Celular|Telefone)\s*:\s*([^\n\r]+)', description, re.IGNORECASE)
+            if m_ph and _has_valid_digits(m_ph.group(1)):
+                phone = m_ph.group(1).strip()
+        if not landline_phone:
+            m_ll = re.search(r'(?:☎️\s*Telefone\s*Fixo|Telefone\s*Fixo|Fixo)\s*:\s*([^\n\r]+)', description, re.IGNORECASE)
+            if m_ll and _has_valid_digits(m_ll.group(1)):
+                landline_phone = m_ll.group(1).strip()
+        if not email:
+            m_em = re.search(r'(?:✉️\s*E-mail|E-mail|Email)\s*:\s*([^\s\n\r]+@[^\s\n\r]+)', description, re.IGNORECASE)
+            if m_em:
+                email = m_em.group(1).strip()
+
+    if whatsapp and not _has_valid_digits(whatsapp):
+        whatsapp = None
+    if phone and not _has_valid_digits(phone):
+        phone = None
+    if landline_phone and not _has_valid_digits(landline_phone):
+        landline_phone = None
 
     if not application_url and description:
         match = re.search(r'(?:Link do Anúncio|Link da vaga|\[LINK)[\s\S]*?(https?://\S+)', description, re.IGNORECASE)
@@ -155,9 +184,12 @@ async def create_job_ad(
     raw_link = application_url or link
     clean_link = unwrap_link(raw_link)
 
-    import re
-    if clean_whatsapp and not re.search(r'\d{6,}', clean_whatsapp):
+    if clean_whatsapp and not _has_valid_digits(clean_whatsapp):
         clean_whatsapp = None
+    if clean_phone and not _has_valid_digits(clean_phone):
+        clean_phone = None
+    if clean_landline and not _has_valid_digits(clean_landline):
+        clean_landline = None
 
     if not clean_email and not clean_whatsapp and not clean_phone and not clean_landline and not clean_link:
         raise HTTPException(
